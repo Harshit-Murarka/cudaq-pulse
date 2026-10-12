@@ -1,0 +1,65 @@
+# ============================================================================ #
+# Copyright (c) 2026 NVIDIA Corporation & Affiliates.                          #
+# All rights reserved.                                                         #
+#                                                                              #
+# This source code and the accompanying materials are made available under     #
+# the terms of the Apache License 2.0 which accompanies this distribution.     #
+# ============================================================================ #
+
+name: docs
+
+# Builds the Sphinx site with warnings as errors on every pull request, and
+# deploys it to GitHub Pages from main once the repository is public.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v10
+        with:
+          python-version: "3.12"
+      - run: uv sync --locked
+      - uses: ./.github/actions/mlir-toolchain
+
+      - name: Build
+        run: |
+          uv run --no-sync cmake -S . -B build/docs -G Ninja \
+            -DCUDAQ_PULSE_BUILD_DOCS=ON \
+            -DPython3_EXECUTABLE="$PWD/.venv/bin/python"
+          uv run --no-sync cmake --build build/docs --target pulse-docs
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: build/docs/docs/html
+
+  deploy:
+    if: >-
+      github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+      github.event.repository.visibility == 'public'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

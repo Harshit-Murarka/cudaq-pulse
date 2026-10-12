@@ -1,0 +1,106 @@
+# ============================================================================ #
+# Copyright (c) 2026 NVIDIA Corporation & Affiliates.                          #
+# All rights reserved.                                                         #
+#                                                                              #
+# This source code and the accompanying materials are made available under     #
+# the terms of the Apache License 2.0 which accompanies this distribution.     #
+# ============================================================================ #
+
+name: mlir-toolchain
+
+# Builds the pinned MLIR toolchain and publishes it as release assets under the
+# tag named in tools/mlir-toolchain.lock.json. Run manually whenever
+# tools/build-mlir-toolchain.sh changes, then commit the printed checksums to
+# the lock file.
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Upload the archives to the toolchain release
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.container }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x86_64
+            runner: ubuntu-24.04
+            container: quay.io/pypa/manylinux_2_28_x86_64
+          - platform: linux-aarch64
+            runner: ubuntu-24.04-arm
+            container: quay.io/pypa/manylinux_2_28_aarch64
+          - platform: macos-aarch64
+            runner: macos-15
+            container: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools (manylinux)
+        if: startsWith(matrix.platform, 'linux')
+        run: pipx install cmake ninja
+
+      - name: Install build tools (macOS)
+        if: startsWith(matrix.platform, 'macos')
+        run: brew install ninja
+
+      - name: Build toolchain
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "11.0"
+        run: tools/build-mlir-toolchain.sh --work-dir "$RUNNER_TEMP/mlir" --out-dir dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mlir-toolchain-${{ matrix.platform }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Record checksums
+        run: |
+          {
+            echo '### Checksums for tools/mlir-toolchain.lock.json'
+            echo '```json'
+            python3 - <<'EOF'
+          import json, pathlib
+          assets = {}
+          for sha_file in sorted(pathlib.Path("dist").glob("*.sha256")):
+              digest, name = sha_file.read_text().split()
+              assets[name] = digest
+          print(json.dumps({"assets": assets}, indent=2))
+          EOF
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload release assets
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$(jq -r .release_tag tools/mlir-toolchain.lock.json)"
+          gh release view "$tag" >/dev/null 2>&1 ||
+            gh release create "$tag" --title "$tag" \
+              --notes "Prebuilt MLIR toolchain used to build cudaq-pulse." --prerelease
+          gh release upload "$tag" dist/*.tar.xz dist/*.sha256 --clobber

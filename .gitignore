@@ -1,0 +1,40 @@
+# Build trees
+build*/
+dist/
+wheelhouse/
+_skbuild/
+*.egg-info/
+
+# Fetched MLIR toolchains and other local caches
+.cache/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.hypothesis/
+.mypy_cache/
+.ruff_cache/
+
+# Native artifacts produced outside the build tree
+*.o
+*.so
+*.dylib
+*.a
+
+# Docs
+docs/_build/
+
+# Benchmark output
+benchmarks/results/
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Generated summaries and notes stay out of the tracked tree
+*.summary.md
+NOTES*.md

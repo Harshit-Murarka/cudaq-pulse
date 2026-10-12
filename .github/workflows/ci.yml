@@ -1,0 +1,123 @@
+# ============================================================================ #
+# Copyright (c) 2026 NVIDIA Corporation & Affiliates.                          #
+# All rights reserved.                                                         #
+#                                                                              #
+# This source code and the accompanying materials are made available under     #
+# the terms of the Apache License 2.0 which accompanies this distribution.     #
+# ============================================================================ #
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      gpu:
+        description: Also build with CUDAQ_PULSE_ENABLE_GPU=ON and run the GPU tests
+        type: boolean
+        default: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v10
+        with:
+          python-version: "3.12"
+      - run: uv sync --locked --only-group lint
+      - run: uv run --no-sync ruff check .
+      - run: uv run --no-sync ruff format --check .
+      - run: uv run --no-sync pre-commit run --all-files --show-diff-on-failure
+
+  test:
+    name: test (${{ matrix.platform }}, py${{ matrix.python }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: linux-x86_64, runner: ubuntu-24.04, python: "3.10" }
+          - { platform: linux-x86_64, runner: ubuntu-24.04, python: "3.14" }
+          - { platform: linux-aarch64, runner: ubuntu-24.04-arm, python: "3.12" }
+          - { platform: macos-aarch64, runner: macos-15, python: "3.12" }
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v10
+        with:
+          python-version: ${{ matrix.python }}
+      - run: uv sync --locked
+      - uses: ./.github/actions/mlir-toolchain
+
+      - name: Configure
+        run: >
+          uv run --no-sync cmake -S . -B build/dev -G Ninja
+          -DCUDAQ_PULSE_BUILD_TESTS=ON
+          -DPython3_EXECUTABLE="$PWD/.venv/bin/python"
+
+      - name: check-pulse (lit + pytest)
+        run: uv run --no-sync cmake --build build/dev --target check-pulse
+
+      - name: mypy
+        run: MYPYPATH=build/dev/python uv run --no-sync mypy -p cudaq_pulse
+
+      - name: Compile-time benchmark (op-count baseline)
+        run: >
+          PYTHONPATH=build/dev/python uv run --no-sync python
+          benchmarks/compiler/compile_time.py --iterations 5
+          --baseline benchmarks/baselines/compile_time.json
+
+  # Opt-in: requires a runner with an NVIDIA GPU, a driver, and the CUDA 12.9
+  # toolkit, selected by the GPU_RUNNER repository variable. Fails if any of
+  # those is missing; it never skips.
+  gpu:
+    if: github.event_name == 'workflow_dispatch' && inputs.gpu
+    runs-on: ${{ vars.GPU_RUNNER }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v10
+        with:
+          python-version: "3.12"
+      - run: uv sync --locked
+      - uses: ./.github/actions/mlir-toolchain
+
+      - name: Require a GPU and the CUDA toolkit
+        run: |
+          nvidia-smi
+          nvcc --version
+
+      - name: Install the [gpu] runtime libraries
+        run: |
+          uv pip install -r pyproject.toml --extra gpu
+          root="$(.venv/bin/python -c 'import cuquantum; print(cuquantum.__path__[0])')"
+          echo "CUDENSITYMAT_ROOT=$root" >> "$GITHUB_ENV"
+
+      - name: Configure
+        run: >
+          uv run --no-sync cmake -S . -B build/gpu -G Ninja
+          -DCUDAQ_PULSE_BUILD_TESTS=ON
+          -DCUDAQ_PULSE_ENABLE_GPU=ON
+          -DPython3_EXECUTABLE="$PWD/.venv/bin/python"
+
+      - name: check-pulse
+        run: uv run --no-sync cmake --build build/gpu --target check-pulse
+
+      - name: check-pulse-gpu
+        run: uv run --no-sync cmake --build build/gpu --target check-pulse-gpu

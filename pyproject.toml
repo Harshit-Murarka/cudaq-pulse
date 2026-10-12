@@ -1,0 +1,184 @@
+# ============================================================================ #
+# Copyright (c) 2026 NVIDIA Corporation & Affiliates.                          #
+# All rights reserved.                                                         #
+#                                                                              #
+# This source code and the accompanying materials are made available under     #
+# the terms of the Apache License 2.0 which accompanies this distribution.     #
+# ============================================================================ #
+
+# Building from source needs the pinned MLIR toolchain unpacked by
+# `python tools/fetch-mlir-toolchain.py`; see CONTRIBUTING.md.
+[build-system]
+requires = [
+    "scikit-build-core>=0.11",
+    "setuptools-scm>=8",
+    "nanobind>=2.12",
+]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "cudaq-pulse"
+dynamic = ["version"]
+description = "Pulse-level MLIR dialect and programming model for quantum control"
+readme = "README.md"
+authors = [{ name = "NVIDIA Corporation" }]
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.24"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Physics",
+]
+
+[project.optional-dependencies]
+# Every shared library libcudm-runtime.so loads, transitively, except the
+# driver's libcuda.so.1. cudensitymat is pre-1.0, so pin the minor we build against.
+gpu = [
+    "cudensitymat-cu12==0.7.*",
+    "nvidia-cuda-runtime-cu12>=12.9,<13",
+    "nvidia-cublas-cu12>=12.9,<13",
+    "nvidia-cusolver-cu12>=11.7.5,<12",
+    "nvidia-cusparse-cu12>=12.5.10,<13",
+    "nvidia-curand-cu12>=10.3.10,<11",
+    "nvidia-nvjitlink-cu12>=12.9,<13",
+]
+viz = ["matplotlib>=3.7"]
+
+[dependency-groups]
+build = [
+    "cmake>=3.27",
+    "ninja>=1.11",
+    "nanobind>=2.12",
+    "numpy>=1.24",
+]
+test = [
+    "pytest>=8",
+    "hypothesis>=6",
+    "lit>=18",
+]
+lint = [
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "pre-commit>=3.7",
+    # mypy checks cudaq_pulse.viz against matplotlib's own annotations.
+    "matplotlib>=3.7",
+]
+docs = [
+    "sphinx>=7",
+    "myst-parser>=3",
+    "nvidia-sphinx-theme==0.0.8",
+]
+bench = ["matplotlib>=3.7"]
+dev = [
+    { include-group = "build" },
+    { include-group = "test" },
+    { include-group = "lint" },
+    { include-group = "docs" },
+]
+
+[tool.uv]
+default-groups = ["dev"]
+# `uv sync` installs tooling only. The package itself is built by CMake
+# (contributor loop) or by `pip install .` (wheel); see CONTRIBUTING.md.
+package = false
+
+[tool.scikit-build]
+minimum-version = "build-system.requires"
+build-dir = "build/{wheel_tag}"
+cmake.build-type = "Release"
+install.components = ["CudaqPulse"]
+install.strip = true
+wheel.packages = []
+sdist.exclude = [".cache", "build", "dist", "wheelhouse", ".github"]
+metadata.version.provider = "scikit_build_core.metadata.setuptools_scm"
+
+[tool.scikit-build.cmake.define]
+CUDAQ_PULSE_BUILD_TESTS = "OFF"
+CUDAQ_PULSE_ENABLE_GPU = { env = "CUDAQ_PULSE_ENABLE_GPU", default = "OFF" }
+
+[tool.setuptools_scm]
+
+[tool.cibuildwheel]
+build = ["cp310-*", "cp311-*", "cp312-*", "cp313-*", "cp314-*"]
+skip = ["*-musllinux_*"]
+manylinux-x86_64-image = "manylinux_2_28"
+manylinux-aarch64-image = "manylinux_2_28"
+build-verbosity = 1
+test-extras = ["gpu"]
+test-groups = ["test"]
+test-sources = ["tests", "pyproject.toml"]
+test-command = [
+    "python -c \"import cudaq_pulse._build_config as c; assert c.GPU_RUNTIME_ENABLED, 'release wheels must include the GPU runtime'\"",
+    "cudaq-pulse-opt --help > /dev/null",
+    "python -m pytest -m \"not gpu\"",
+]
+
+[tool.cibuildwheel.linux]
+before-all = "bash tools/ci/manylinux-before-all.sh"
+environment = { CUDAQ_PULSE_ENABLE_GPU = "ON", CUDAToolkit_ROOT = "/usr/local/cuda-12.9", CUDENSITYMAT_ROOT = "/opt/cudensitymat/cuquantum" }
+repair-wheel-command = "auditwheel repair --exclude libcudensitymat.so.0 --exclude libcudart.so.12 -w {dest_dir} {wheel}"
+
+# macOS wheels are compiler-only: there is no CUDA on macOS.
+[tool.cibuildwheel.macos]
+archs = ["arm64"]
+environment = { MACOSX_DEPLOYMENT_TARGET = "11.0" }
+test-extras = []
+test-command = [
+    "python -c \"import cudaq_pulse._build_config as c; assert not c.GPU_RUNTIME_ENABLED, 'macOS wheels must be compiler-only'\"",
+    "cudaq-pulse-opt --help > /dev/null",
+    "python -m pytest -m \"not gpu\"",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = ["build", ".cache"]
+# Kernel DSL intrinsics: resolved while @pulse.kernel traces the body, never
+# bound at module scope.
+builtins = [
+  "cosine", "custom", "custom_samples", "drag", "drive", "gaussian",
+  "gaussian_square", "get_drive_line", "get_readout_line", "qudit_ref",
+  "readout", "set_frequency", "set_phase", "shift_frequency", "shift_phase",
+  "square", "sync", "tanh_ramp", "wait", "wf_add", "wf_mul", "wf_neg",
+  "wf_scale", "wf_sub",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"test/**/lit*.cfg.py" = ["F821"]
+# Physics notation (L, H_total) and short corpus constructors (_C, _O, ...).
+"core/frontend/cudaq_pulse/passes/pulse_to_operator.py" = ["N806"]
+"tests/workloads/bug_corpus.py" = ["N802"]
+# Public API name.
+"core/frontend/cudaq_pulse/passes/verify.py" = ["N818"]
+# Column-aligned report tables.
+"benchmarks/**" = ["E501"]
+"examples/**" = ["E501"]
+
+[tool.mypy]
+strict = true
+python_version = "3.10"
+
+# Generated by nanobind.stubgen; its ndarray shape annotations are not PEP 484.
+[[tool.mypy.overrides]]
+module = "cudaq_pulse._native._cudaq_pulse_native"
+ignore_errors = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-ra", "--strict-markers"]
+markers = [
+    "gpu: requires GPU runtime",
+    "slow: long-running tests",
+]

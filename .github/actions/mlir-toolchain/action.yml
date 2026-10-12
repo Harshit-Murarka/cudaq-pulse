@@ -1,0 +1,46 @@
+# ============================================================================ #
+# Copyright (c) 2026 NVIDIA Corporation & Affiliates.                          #
+# All rights reserved.                                                         #
+#                                                                              #
+# This source code and the accompanying materials are made available under     #
+# the terms of the Apache License 2.0 which accompanies this distribution.     #
+# ============================================================================ #
+
+name: MLIR toolchain
+description: >
+  Download the pinned MLIR toolchain release asset into .cache/mlir/downloads
+  and, unless told otherwise, verify and unpack it with
+  tools/fetch-mlir-toolchain.py. Fails if the asset is missing or its
+  checksum does not match tools/mlir-toolchain.lock.json.
+
+inputs:
+  platform:
+    description: Toolchain platform (e.g. linux-x86_64); defaults to the runner's.
+    required: false
+    default: ""
+  unpack:
+    description: Verify and unpack on the runner. Set to false when a container unpacks it.
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Download and verify
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        PLATFORM: ${{ inputs.platform }}
+        UNPACK: ${{ inputs.unpack }}
+      run: |
+        set -euo pipefail
+        args=()
+        if [[ -n "$PLATFORM" ]]; then args+=(--platform "$PLATFORM"); fi
+        archive="$(python3 tools/fetch-mlir-toolchain.py --print-archive-name "${args[@]}")"
+        tag="$(python3 -c 'import json; print(json.load(open("tools/mlir-toolchain.lock.json"))["release_tag"])')"
+        mkdir -p .cache/mlir/downloads
+        gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
+          --pattern "$archive" --dir .cache/mlir/downloads --clobber
+        if [[ "$UNPACK" == "true" ]]; then
+          python3 tools/fetch-mlir-toolchain.py "${args[@]}"
+        fi

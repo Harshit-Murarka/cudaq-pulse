@@ -1,0 +1,6 @@
+{
+  "llvm_version": "22.1.8",
+  "release_tag": "mlir-toolchain-22.1.8",
+  "base_url": "https://github.com/NVIDIA/cudaq-pulse/releases/download/mlir-toolchain-22.1.8",
+  "assets": {}
+}
