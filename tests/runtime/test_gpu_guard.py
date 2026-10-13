@@ -35,7 +35,7 @@ def test_error_classes_are_distinct():
 
 @compiler_only
 def test_compiler_only_build_reports_missing_gpu_support():
-    with pytest.raises(gpu.GpuSupportNotBuiltError, match=r"cudaq-pulse\[gpu\]"):
+    with pytest.raises(gpu.GpuSupportNotBuiltError, match=r"cudaq-pulse\[cu12\].*\[cu13\]"):
         gpu.require_gpu_runtime()
 
 
@@ -83,10 +83,12 @@ def _fake_site(root, relatives):
         path.write_bytes(b"")
 
 
-def test_cuda_wheel_libraries_are_found_in_load_order(tmp_path):
+@pytest.mark.parametrize("major", [12, 13])
+def test_cuda_wheel_libraries_are_found_in_load_order(tmp_path, major):
     # Namespace packages may be split across site directories.
-    nvidia = [r for r in gpu._CUDA_WHEEL_LIBRARIES if r.startswith("nvidia/")]
-    others = [r for r in gpu._CUDA_WHEEL_LIBRARIES if r not in nvidia]
+    libraries = gpu._CUDA_WHEEL_LIBRARIES[major]
+    nvidia = [r for r in libraries if r.startswith("nvidia/")]
+    others = [r for r in libraries if r not in nvidia]
     _fake_site(tmp_path / "site_a", nvidia)
     _fake_site(tmp_path / "site_b", others)
     roots = {
@@ -94,19 +96,27 @@ def test_cuda_wheel_libraries_are_found_in_load_order(tmp_path):
         for top in ("nvidia", "cutensor", "cuquantum")
     }
 
-    found, missing = gpu._locate_cuda_wheel_libraries(lambda top: roots[top])
+    found, missing = gpu._locate_cuda_wheel_libraries(libraries, lambda top: roots[top])
 
     assert missing == []
-    assert [p.name for p in found] == [r.rsplit("/", 1)[1] for r in gpu._CUDA_WHEEL_LIBRARIES]
+    assert [p.name for p in found] == [r.rsplit("/", 1)[1] for r in libraries]
 
 
-def test_cuda_wheel_libraries_report_what_is_not_installed(tmp_path):
-    present = [r for r in gpu._CUDA_WHEEL_LIBRARIES if "cublas" not in r]
+@pytest.mark.parametrize(
+    ("major", "cublas"),
+    [
+        (12, ["libcublasLt.so.12", "libcublas.so.12"]),
+        (13, ["libcublasLt.so.13", "libcublas.so.13"]),
+    ],
+)
+def test_cuda_wheel_libraries_report_what_is_not_installed(tmp_path, major, cublas):
+    libraries = gpu._CUDA_WHEEL_LIBRARIES[major]
+    present = [r for r in libraries if "cublas" not in r]
     _fake_site(tmp_path, present)
 
-    found, missing = gpu._locate_cuda_wheel_libraries(lambda top: [tmp_path / top])
+    found, missing = gpu._locate_cuda_wheel_libraries(libraries, lambda top: [tmp_path / top])
 
-    assert missing == ["libcublasLt.so.12", "libcublas.so.12"]
+    assert missing == cublas
     assert len(found) == len(present)
 
 

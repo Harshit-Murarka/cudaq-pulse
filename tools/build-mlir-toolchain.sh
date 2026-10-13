@@ -146,6 +146,10 @@ rm -rf "$prefix"
 cmake --build "$build_dir" --parallel "$jobs" --target install-distribution
 
 rm -rf "${prefix}/share"
+cp "${src_dir}/llvm/LICENSE.TXT" "${prefix}/LICENSE.TXT"
+if [[ -f "${src_dir}/mlir/LICENSE.TXT" ]]; then
+  cp "${src_dir}/mlir/LICENSE.TXT" "${prefix}/LICENSE-mlir.TXT"
+fi
 if [[ "$os" == "linux" ]]; then
   strip_args=(--strip-unneeded)
 else

@@ -6,9 +6,18 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
+# STABLE_ABI takes effect only on CPython >= 3.12 with Python::SABIModule,
+# which is found when scikit-build-core builds a cp312-abi3 wheel.
+if(SKBUILD_SABI_VERSION AND NOT TARGET Python::SABIModule)
+  message(FATAL_ERROR
+    "scikit-build-core is tagging this wheel abi3 (Python ${SKBUILD_SABI_VERSION}), "
+    "but FindPython did not provide Development.SABIModule, so the extension "
+    "would not be built against the stable ABI.")
+endif()
 nanobind_add_module(
   _cudaq_pulse_native
   NB_STATIC
+  STABLE_ABI
   bindings.cpp
 )
 

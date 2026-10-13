@@ -12,6 +12,8 @@
 #   python tools/fetch-mlir-toolchain.py
 #   cmake -S . -B build -G Ninja
 #
+# Configuring runs the fetch itself when the toolchain is not unpacked yet.
+#
 # See CONTRIBUTING.md for the full build, test, and GPU-runtime instructions.
 cmake_minimum_required(VERSION 3.30 FATAL_ERROR)
 
@@ -36,7 +38,7 @@ find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter Development.Module)
 set(CUDAQ_PULSE_LLVM_VERSION "22.1.8")
 
 # tools/fetch-mlir-toolchain.py unpacks the pinned, checksum-verified
-# toolchain here. An explicit CMAKE_PREFIX_PATH takes precedence.
+# toolchain here. An explicit MLIR_DIR or CMAKE_PREFIX_PATH takes precedence.
 if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
   set(_cudaq_pulse_host_os macos)
 else()
@@ -44,19 +46,64 @@ else()
 endif()
 if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64|ARM64)$")
   set(_cudaq_pulse_host_arch aarch64)
-else()
+elseif(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$")
   set(_cudaq_pulse_host_arch x86_64)
+else()
+  string(TOLOWER "${CMAKE_HOST_SYSTEM_PROCESSOR}" _cudaq_pulse_host_arch)
 endif()
+set(_cudaq_pulse_host_platform "${_cudaq_pulse_host_os}-${_cudaq_pulse_host_arch}")
 set(CUDAQ_PULSE_FETCHED_MLIR_PREFIX
-  "${CMAKE_CURRENT_SOURCE_DIR}/.cache/mlir/mlir-toolchain-${CUDAQ_PULSE_LLVM_VERSION}-${_cudaq_pulse_host_os}-${_cudaq_pulse_host_arch}")
+  "${CMAKE_CURRENT_SOURCE_DIR}/.cache/mlir/mlir-toolchain-${CUDAQ_PULSE_LLVM_VERSION}-${_cudaq_pulse_host_platform}")
+set(_cudaq_pulse_fetch_script "${CMAKE_CURRENT_SOURCE_DIR}/tools/fetch-mlir-toolchain.py")
 
-find_package(MLIR CONFIG HINTS "${CUDAQ_PULSE_FETCHED_MLIR_PREFIX}")
+set(_cudaq_pulse_user_mlir_dir "")
+if(MLIR_DIR AND NOT MLIR_DIR MATCHES "-NOTFOUND$")
+  set(_cudaq_pulse_user_mlir_dir "${MLIR_DIR}")
+endif()
+if(_cudaq_pulse_user_mlir_dir)
+  find_package(MLIR CONFIG QUIET PATHS "${_cudaq_pulse_user_mlir_dir}" NO_DEFAULT_PATH)
+  if(NOT MLIR_FOUND)
+    message(FATAL_ERROR
+      "MLIR_DIR=${_cudaq_pulse_user_mlir_dir} does not contain MLIRConfig.cmake "
+      "for the MLIR ${CUDAQ_PULSE_LLVM_VERSION} toolchain.")
+  endif()
+else()
+  find_package(MLIR CONFIG QUIET HINTS "${CUDAQ_PULSE_FETCHED_MLIR_PREFIX}")
+endif()
 if(NOT MLIR_FOUND)
-  message(FATAL_ERROR
-    "cudaq-pulse requires the MLIR ${CUDAQ_PULSE_LLVM_VERSION} toolchain, "
-    "which was found neither on CMAKE_PREFIX_PATH nor at "
-    "${CUDAQ_PULSE_FETCHED_MLIR_PREFIX}. Fetch it with "
-    "`python tools/fetch-mlir-toolchain.py`.")
+  execute_process(
+    COMMAND "${Python3_EXECUTABLE}" "${_cudaq_pulse_fetch_script}" --list-platforms
+    OUTPUT_VARIABLE _cudaq_pulse_toolchain_platforms
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    COMMAND_ERROR_IS_FATAL ANY)
+  string(REPLACE "\n" ";" _cudaq_pulse_toolchain_platforms "${_cudaq_pulse_toolchain_platforms}")
+  if(NOT _cudaq_pulse_host_platform IN_LIST _cudaq_pulse_toolchain_platforms)
+    list(JOIN _cudaq_pulse_toolchain_platforms ", " _cudaq_pulse_toolchain_platforms)
+    message(FATAL_ERROR
+      "cudaq-pulse requires the MLIR ${CUDAQ_PULSE_LLVM_VERSION} toolchain, and "
+      "no prebuilt toolchain exists for ${_cudaq_pulse_host_platform} (only "
+      "${_cudaq_pulse_toolchain_platforms}). Build one with "
+      "tools/build-mlir-toolchain.sh and configure with "
+      "-DMLIR_DIR=<prefix>/lib/cmake/mlir.")
+  endif()
+  message(STATUS "Fetching the MLIR ${CUDAQ_PULSE_LLVM_VERSION} toolchain for ${_cudaq_pulse_host_platform}")
+  execute_process(
+    COMMAND "${Python3_EXECUTABLE}" "${_cudaq_pulse_fetch_script}"
+    OUTPUT_VARIABLE _cudaq_pulse_fetched_prefix
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_VARIABLE _cudaq_pulse_fetch_error
+    ERROR_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE _cudaq_pulse_fetch_status)
+  if(NOT _cudaq_pulse_fetch_status EQUAL 0)
+    message(FATAL_ERROR
+      "cudaq-pulse requires the MLIR ${CUDAQ_PULSE_LLVM_VERSION} toolchain, "
+      "which was not found on MLIR_DIR or CMAKE_PREFIX_PATH, and fetching it "
+      "failed:\n${_cudaq_pulse_fetch_error}\n"
+      "Alternatively, configure with -DMLIR_DIR=<prefix>/lib/cmake/mlir.")
+  endif()
+  unset(MLIR_DIR CACHE)
+  find_package(MLIR CONFIG REQUIRED
+    PATHS "${_cudaq_pulse_fetched_prefix}" NO_DEFAULT_PATH)
 endif()
 if(NOT LLVM_PACKAGE_VERSION VERSION_EQUAL CUDAQ_PULSE_LLVM_VERSION)
   message(FATAL_ERROR

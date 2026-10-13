@@ -24,16 +24,55 @@ Installation
 
 .. code-block:: bash
 
-   pip install "cudaq-pulse[gpu]"
+   pip install "cudaq-pulse[cu12]"   # CUDA 12 libraries
+   pip install "cudaq-pulse[cu13]"   # CUDA 13 libraries
 
 .. :spellcheck-enable:
 
-The Linux wheels include the cuDensityMat runtime library, and the ``gpu``
-extra installs cuDensityMat and the CUDA 12 libraries it depends on from
-PyPI. Execution needs an NVIDIA GPU with compute capability 7.0 or newer and
-a driver that supports CUDA 12.9. macOS wheels are compiler-only.
+The Linux wheels include a cuDensityMat runtime library for each of CUDA 12
+and CUDA 13. The ``cu12`` and ``cu13`` extras install cuDensityMat and the
+CUDA libraries for that major from PyPI; ``gpu`` is an alias for ``cu12``.
+The two extras write the same files, so an environment may contain only one
+of them. macOS wheels are compiler-only.
 
-To check an installation:
+Execution needs an NVIDIA GPU with compute capability 7.0 or newer and a
+Linux driver new enough for the installed CUDA major. No CUDA toolkit is
+used.
+
+.. list-table:: Driver requirements
+   :header-rows: 1
+
+   * - Extra
+     - Minimum NVIDIA driver
+   * - ``[cu12]`` (or ``[gpu]``)
+     - 525.60.13
+   * - ``[cu13]``
+     - 580
+
+cudaq-pulse picks the runtime that matches the installed extra. To choose it
+explicitly, set ``CUDAQ_PULSE_CUDA`` to ``12`` or ``13``. ``CUDM_RUNTIME_LIB``
+points at a specific runtime library instead, for development builds.
+
+Troubleshooting
+---------------
+
+Run the diagnostics first:
+
+.. :spellcheck-disable:
+
+.. code-block:: bash
+
+   python -m cudaq_pulse.doctor
+
+.. :spellcheck-enable:
+
+It prints the version, the wheel platform, whether the GPU runtime is built
+in, which CUDA extra is installed, each library it loads with its path or the
+load error, and the driver version and device count. It exits non-zero when
+GPU execution does not work; ``--allow-no-gpu`` accepts a working
+compiler-only installation.
+
+From Python, the same check is:
 
 .. :spellcheck-disable:
 
@@ -65,11 +104,14 @@ subclasses of ``cudaq_pulse.runtime.gpu.GpuRuntimeError``:
 
 ``GpuRuntimeLoadError``
    The runtime is built in but its libraries failed to load, usually because
-   the ``gpu`` extra is not installed. The message names the library that
-   failed and any CUDA libraries that are not installed as Python packages.
+   no CUDA extra is installed or both ``cu12`` and ``cu13`` are. The message
+   names the library that failed and any CUDA libraries that are not
+   installed as Python packages.
 
 ``GpuDeviceUnavailableError``
-   The libraries loaded, but no NVIDIA driver or device is available.
+   The libraries loaded, but no NVIDIA driver or device is available, or the
+   driver is older than the installed CUDA major requires. The message names
+   the driver version needed.
 
 Compilation, transformation, and IR inspection never require the runtime, so
 they work in every installation.

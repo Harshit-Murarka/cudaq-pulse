@@ -32,19 +32,41 @@ needed.
    # Compiler only (Linux and macOS)
    pip install cudaq-pulse
 
-   # Compiler plus GPU simulation (Linux x86_64 and aarch64)
-   pip install "cudaq-pulse[gpu]"
+   # Compiler plus GPU simulation (Linux), with CUDA 12 or CUDA 13 libraries
+   pip install "cudaq-pulse[cu12]"
+   pip install "cudaq-pulse[cu13]"
+
+   # Report what was installed and whether it works
+   python -m cudaq_pulse.doctor
 
 .. :spellcheck-enable:
 
-The ``gpu`` extra installs cuDensityMat and the CUDA 12 runtime libraries it
-needs from PyPI. GPU execution additionally requires an NVIDIA GPU with
-compute capability 7.0 or newer and a driver that supports CUDA 12.9; no CUDA
-toolkit or cuQuantum SDK installation is needed.
+``[gpu]`` is an alias for ``[cu12]``. Each CUDA extra installs cuDensityMat
+and the CUDA runtime libraries it needs from PyPI; the two extras write the
+same files, so install only one of them per environment.
+
+.. list-table:: Supported platforms
+   :header-rows: 1
+
+   * - Platform
+     - Python
+     - Capabilities
+   * - Linux x86_64 and aarch64, glibc 2.28 or newer
+     - 3.10+
+     - Compiler; GPU execution with ``[cu12]`` or ``[cu13]``
+   * - macOS 11 or newer, arm64
+     - 3.10+
+     - Compiler only
+
+GPU execution additionally requires an NVIDIA GPU with compute capability 7.0
+or newer and a Linux driver of at least 525.60.13 for ``[cu12]`` or 580 for
+``[cu13]``. The driver is the only system requirement: no CUDA toolkit or
+cuQuantum SDK installation is needed. See :doc:`user_guide/gpu_execution`.
 
 Every installation can trace, compile, transform, and inspect kernels, and
 ships the ``cudaq-pulse-opt`` MLIR driver. Only execution needs the GPU, and
-it never degrades silently; see :ref:`gpu-errors`.
+it never degrades silently; see :ref:`gpu-errors`. If something does not
+work, run ``python -m cudaq_pulse.doctor`` first.
 
 Hello World
 -----------
@@ -146,7 +168,7 @@ root. In short:
 .. code-block:: bash
 
    uv sync
-   python3 tools/fetch-mlir-toolchain.py
+   python3 tools/fetch-mlir-toolchain.py   # optional; configuring fetches it too
    cmake -S . -B build/dev -G Ninja \
      -DCUDAQ_PULSE_BUILD_TESTS=ON \
      -DPython3_EXECUTABLE="$PWD/.venv/bin/python"

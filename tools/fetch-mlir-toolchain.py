@@ -37,6 +37,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 LOCK_FILE = REPO_ROOT / "tools" / "mlir-toolchain.lock.json"
 DEFAULT_CACHE = REPO_ROOT / ".cache" / "mlir"
 MARKER = ".cudaq-pulse-sha256"
+# The platforms .github/workflows/mlir-toolchain.yml builds a toolchain for.
+PLATFORMS = ("linux-x86_64", "linux-aarch64", "macos-aarch64")
 
 
 class FetchError(Exception):
@@ -47,9 +49,14 @@ def host_platform() -> str:
     systems = {"Linux": "linux", "Darwin": "macos"}
     machines = {"x86_64": "x86_64", "AMD64": "x86_64", "aarch64": "aarch64", "arm64": "aarch64"}
     system, machine = platform.system(), platform.machine()
-    if system not in systems or machine not in machines:
-        raise FetchError(f"no MLIR toolchain is built for {system}/{machine}")
-    return f"{systems[system]}-{machines[machine]}"
+    plat = f"{systems.get(system, system)}-{machines.get(machine, machine)}"
+    if plat not in PLATFORMS:
+        raise FetchError(
+            f"no MLIR toolchain is built for {system}/{machine}; prebuilt toolchains "
+            f"exist for {', '.join(PLATFORMS)}. Build one with "
+            f"tools/build-mlir-toolchain.sh and configure with -DMLIR_DIR=<prefix>/lib/cmake/mlir."
+        )
+    return plat
 
 
 def sha256_of(path: Path) -> str:
@@ -146,7 +153,16 @@ def main(argv: list[str]) -> int:
     parser.add_argument(
         "--print-archive-name", action="store_true", help="print the release asset name and exit"
     )
+    parser.add_argument(
+        "--list-platforms",
+        action="store_true",
+        help="print the platforms with a prebuilt toolchain, one per line, and exit",
+    )
     args = parser.parse_args(argv)
+
+    if args.list_platforms:
+        print("\n".join(PLATFORMS))
+        return 0
 
     try:
         lock = load_lock()

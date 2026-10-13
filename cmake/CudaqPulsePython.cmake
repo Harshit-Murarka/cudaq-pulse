@@ -38,19 +38,29 @@ set(_cudaq_pulse_build_targets
   _cudaq_pulse_native_stub
   CudaqPulsePythonStaging)
 
+set(_cudaq_pulse_runtime_libraries "")
+set(_cudaq_pulse_cudensitymat_versions "")
+set(_cudaq_pulse_cuda_versions "")
+foreach(_major IN LISTS CUDAQ_PULSE_CUDA_MAJORS)
+  list(APPEND _cudaq_pulse_build_targets cudm_runtime_cu${_major})
+  list(APPEND _cudaq_pulse_runtime_libraries
+    "${_major}: \"lib/${CMAKE_SHARED_LIBRARY_PREFIX}cudm-runtime-cu${_major}${CMAKE_SHARED_LIBRARY_SUFFIX}\"")
+  list(APPEND _cudaq_pulse_cudensitymat_versions
+    "${_major}: \"${CUDAQ_PULSE_CUDA${_major}_CUDENSITYMAT_VERSION}\"")
+  list(APPEND _cudaq_pulse_cuda_versions
+    "${_major}: \"${CUDAQ_PULSE_CUDA${_major}_VERSION}\"")
+endforeach()
+list(JOIN _cudaq_pulse_runtime_libraries ", " _cudaq_pulse_runtime_libraries)
+list(JOIN _cudaq_pulse_cudensitymat_versions ", " _cudaq_pulse_cudensitymat_versions)
+list(JOIN _cudaq_pulse_cuda_versions ", " _cudaq_pulse_cuda_versions)
 if(CUDAQ_PULSE_ENABLE_GPU)
-  list(APPEND _cudaq_pulse_build_targets cudm_runtime)
   set(CUDAQ_PULSE_GPU_RUNTIME_ENABLED_PY True)
-  set(CUDAQ_PULSE_GPU_RUNTIME_LIBRARY_PY
-    "\"lib/${CMAKE_SHARED_LIBRARY_PREFIX}cudm-runtime${CMAKE_SHARED_LIBRARY_SUFFIX}\"")
-  set(CUDAQ_PULSE_CUDENSITYMAT_VERSION_PY "\"${cuDensityMat_VERSION}\"")
-  set(CUDAQ_PULSE_CUDA_VERSION_PY "\"${CUDAToolkit_VERSION}\"")
 else()
   set(CUDAQ_PULSE_GPU_RUNTIME_ENABLED_PY False)
-  set(CUDAQ_PULSE_GPU_RUNTIME_LIBRARY_PY None)
-  set(CUDAQ_PULSE_CUDENSITYMAT_VERSION_PY None)
-  set(CUDAQ_PULSE_CUDA_VERSION_PY None)
 endif()
+set(CUDAQ_PULSE_GPU_RUNTIME_LIBRARIES_PY "{${_cudaq_pulse_runtime_libraries}}")
+set(CUDAQ_PULSE_CUDENSITYMAT_VERSIONS_PY "{${_cudaq_pulse_cudensitymat_versions}}")
+set(CUDAQ_PULSE_CUDA_VERSIONS_PY "{${_cudaq_pulse_cuda_versions}}")
 
 configure_file(
   "${CUDAQ_PULSE_SOURCE_DIR}/cmake/_build_config.py.in"

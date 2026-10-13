@@ -6,8 +6,9 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
-# Building from source needs the pinned MLIR toolchain unpacked by
-# `python tools/fetch-mlir-toolchain.py`; see CONTRIBUTING.md.
+# Building from source needs the pinned MLIR toolchain, which configuring
+# fetches via tools/fetch-mlir-toolchain.py on supported platforms; see
+# CONTRIBUTING.md.
 [build-system]
 requires = [
     "scikit-build-core>=0.11",
@@ -40,9 +41,11 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-# Every shared library libcudm-runtime.so loads, transitively, except the
-# driver's libcuda.so.1. cudensitymat is pre-1.0, so pin the minor we build against.
-gpu = [
+# Every shared library libcudm-runtime-cuNN.so loads, transitively, except the
+# driver's libcuda.so.1. cudensitymat is pre-1.0, so pin the minor we build
+# against. The two sets install into the same cuquantum/ and cutensor/
+# directories, so install only one of them.
+cu12 = [
     "cudensitymat-cu12==0.7.*",
     "nvidia-cuda-runtime-cu12>=12.9,<13",
     "nvidia-cublas-cu12>=12.9,<13",
@@ -51,6 +54,13 @@ gpu = [
     "nvidia-curand-cu12>=10.3.10,<11",
     "nvidia-nvjitlink-cu12>=12.9,<13",
 ]
+# CUDA 13 component wheels are not suffixed by major; cuda-toolkit pins a
+# mutually consistent CUDA 13 set of them.
+cu13 = [
+    "cudensitymat-cu13==0.7.*",
+    "cuda-toolkit[cudart,cublas,cusolver,cusparse,curand,nvjitlink]>=13.0,<14",
+]
+gpu = ["cudaq-pulse[cu12]"]
 viz = ["matplotlib>=3.7"]
 
 [dependency-groups]
@@ -98,34 +108,39 @@ cmake.build-type = "Release"
 install.components = ["CudaqPulse"]
 install.strip = true
 wheel.packages = []
+# Ignored below Python 3.12, which keeps cp310/cp311 version-specific.
+wheel.py-api = "cp312"
 sdist.exclude = [".cache", "build", "dist", "wheelhouse", ".github"]
 metadata.version.provider = "scikit_build_core.metadata.setuptools_scm"
 
 [tool.scikit-build.cmake.define]
 CUDAQ_PULSE_BUILD_TESTS = "OFF"
 CUDAQ_PULSE_ENABLE_GPU = { env = "CUDAQ_PULSE_ENABLE_GPU", default = "OFF" }
+CUDAQ_PULSE_CUDA12_ROOT = { env = "CUDAQ_PULSE_CUDA12_ROOT", default = "" }
+CUDAQ_PULSE_CUDA13_ROOT = { env = "CUDAQ_PULSE_CUDA13_ROOT", default = "" }
 
 [tool.setuptools_scm]
 
 [tool.cibuildwheel]
-build = ["cp310-*", "cp311-*", "cp312-*", "cp313-*", "cp314-*"]
-skip = ["*-musllinux_*"]
+# cp312 builds the abi3 wheel that also covers 3.13 and later.
+build = ["cp310-*", "cp311-*", "cp312-*"]
+skip = ["*-musllinux_*", "*t-*"]
 manylinux-x86_64-image = "manylinux_2_28"
 manylinux-aarch64-image = "manylinux_2_28"
 build-verbosity = 1
-test-extras = ["gpu"]
+test-extras = ["cu12"]
 test-groups = ["test"]
 test-sources = ["tests", "pyproject.toml"]
 test-command = [
-    "python -c \"import cudaq_pulse._build_config as c; assert c.GPU_RUNTIME_ENABLED, 'release wheels must include the GPU runtime'\"",
+    "python -c \"import cudaq_pulse._build_config as c; assert sorted(c.GPU_RUNTIME_LIBRARIES) == [12, 13], 'release wheels must include the CUDA 12 and CUDA 13 GPU runtimes'\"",
     "cudaq-pulse-opt --help > /dev/null",
     "python -m pytest -m \"not gpu\"",
 ]
 
 [tool.cibuildwheel.linux]
 before-all = "bash tools/ci/manylinux-before-all.sh"
-environment = { CUDAQ_PULSE_ENABLE_GPU = "ON", CUDAToolkit_ROOT = "/usr/local/cuda-12.9", CUDENSITYMAT_ROOT = "/opt/cudensitymat/cuquantum" }
-repair-wheel-command = "auditwheel repair --exclude libcudensitymat.so.0 --exclude libcudart.so.12 -w {dest_dir} {wheel}"
+environment = { CUDAQ_PULSE_ENABLE_GPU = "ON", CUDAQ_PULSE_CUDA12_ROOT = "/opt/cuda12", CUDAQ_PULSE_CUDA13_ROOT = "/opt/cuda13" }
+repair-wheel-command = "auditwheel repair --exclude libcudensitymat.so.0 --exclude libcudart.so.12 --exclude libcudart.so.13 -w {dest_dir} {wheel}"
 
 # macOS wheels are compiler-only: there is no CUDA on macOS.
 [tool.cibuildwheel.macos]

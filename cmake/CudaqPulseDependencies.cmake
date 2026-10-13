@@ -12,17 +12,37 @@ include_guard(DIRECTORY)
 # MLIR/LLVM is resolved in the top-level CMakeLists.txt.
 
 # The GPU runtime is an explicit choice, never auto-detected: OFF configures
-# the compiler-only package, ON makes every GPU dependency REQUIRED.
+# the compiler-only package, ON builds one runtime per CUDA major whose root
+# is set and makes every dependency of those runtimes REQUIRED.
 option(CUDAQ_PULSE_ENABLE_GPU
-  "Build the cuDensityMat GPU runtime (requires the CUDA toolkit and cuDensityMat)"
+  "Build the cuDensityMat GPU runtime for each CUDA major with a CUDAQ_PULSE_CUDA<major>_ROOT"
   OFF)
+set(CUDAQ_PULSE_CUDA_SUPPORTED_MAJORS 12 13)
+foreach(_major IN LISTS CUDAQ_PULSE_CUDA_SUPPORTED_MAJORS)
+  set(CUDAQ_PULSE_CUDA${_major}_ROOT "$ENV{CUDAQ_PULSE_CUDA${_major}_ROOT}" CACHE STRING
+    "Directories (;-list) providing the CUDA ${_major} runtime and cuDensityMat for the GPU runtime")
+endforeach()
 
+set(CUDAQ_PULSE_CUDA_MAJORS "")
 if(CUDAQ_PULSE_ENABLE_GPU)
-  find_package(CUDAToolkit REQUIRED)
-  find_package(cuDensityMat REQUIRED)
-  message(STATUS
-    "cudaq-pulse GPU runtime enabled with cuDensityMat ${cuDensityMat_VERSION} "
-    "and CUDA ${CUDAToolkit_VERSION}")
+  include(CudaqPulseCudaMajor)
+  foreach(_major IN LISTS CUDAQ_PULSE_CUDA_SUPPORTED_MAJORS)
+    if(CUDAQ_PULSE_CUDA${_major}_ROOT)
+      cudaq_pulse_find_cuda_major(${_major})
+      list(APPEND CUDAQ_PULSE_CUDA_MAJORS ${_major})
+    endif()
+  endforeach()
+  if(NOT CUDAQ_PULSE_CUDA_MAJORS)
+    message(FATAL_ERROR
+      "CUDAQ_PULSE_ENABLE_GPU=ON needs at least one of CUDAQ_PULSE_CUDA12_ROOT "
+      "or CUDAQ_PULSE_CUDA13_ROOT. For a single-major build, install that "
+      "major's extra (e.g. `uv pip install -r pyproject.toml --extra cu12`) "
+      "and pass a CUDA toolkit plus that site-packages directory, e.g. "
+      "-DCUDAQ_PULSE_CUDA12_ROOT=\"/usr/local/cuda-12.9;$(python -c "
+      "'import sysconfig; print(sysconfig.get_path(\"purelib\"))')\". "
+      "Without a toolkit, also install the header wheels listed in "
+      "tools/ci/manylinux-before-all.sh into that site-packages.")
+  endif()
   add_subdirectory(core/runtime)
 endif()
 
@@ -32,7 +52,10 @@ endif()
 if(NOT Python_EXECUTABLE)
   set(Python_EXECUTABLE "${Python3_EXECUTABLE}")
 endif()
-find_package(Python 3.10 REQUIRED COMPONENTS Interpreter Development.Module)
+# scikit-build-core sets SKBUILD_SABI_COMPONENT when it tags the wheel abi3
+# (wheel.py-api, Python >= 3.12), which nanobind's STABLE_ABI requires.
+find_package(Python 3.10 REQUIRED
+  COMPONENTS Interpreter Development.Module ${SKBUILD_SABI_COMPONENT})
 
 # nanobind ships its own CMake package inside the Python wheel. Ask the
 # interpreter where it is, while still letting -Dnanobind_DIR override.

@@ -68,36 +68,46 @@ if(NOT CUDAQ_PULSE_ENABLE_GPU)
   return()
 endif()
 
-# This private driver is not installed. Without --gpu it verifies cuDensityMat
-# linkage and version discovery; with --gpu it requires a usable device and
-# exercises the basic cuDensityMat descriptors used by the runtime.
-add_executable(cudaq-pulse-cudm-smoke
-  ${CUDAQ_PULSE_SOURCE_DIR}/tests/runtime/cudm_runtime_smoke.cpp)
-target_link_libraries(cudaq-pulse-cudm-smoke PRIVATE
-  cudm_runtime
-  CUDA::cudart)
-set_target_properties(cudaq-pulse-cudm-smoke PROPERTIES
-  BUILD_RPATH "$<TARGET_FILE_DIR:cudm_runtime>")
-
-add_test(NAME PulseCuDensityMatLinkSmoke COMMAND cudaq-pulse-cudm-smoke)
-set_tests_properties(PulseCuDensityMatLinkSmoke PROPERTIES
-  LABELS "pulse;gpu-build")
-add_custom_target(check-pulse-cudm-link
-  COMMAND cudaq-pulse-cudm-smoke
-  DEPENDS cudaq-pulse-cudm-smoke
-  COMMENT "Checking cuDensityMat linkage"
-  USES_TERMINAL)
+# These private drivers are not installed. Without --gpu they verify
+# cuDensityMat linkage and version discovery; with --gpu they require a usable
+# device and exercise the basic cuDensityMat descriptors used by the runtime.
+add_custom_target(check-pulse-cudm-link)
 add_dependencies(check-pulse check-pulse-cudm-link)
+set(_cudaq_pulse_smoke_targets "")
+foreach(_major IN LISTS CUDAQ_PULSE_CUDA_MAJORS)
+  set(_smoke cudaq-pulse-cudm-smoke-cu${_major})
+  add_executable(${_smoke}
+    ${CUDAQ_PULSE_SOURCE_DIR}/tests/runtime/cudm_runtime_smoke.cpp)
+  target_link_libraries(${_smoke} PRIVATE
+    cudm_runtime_cu${_major}
+    cudaq_pulse_cuda${_major})
+  set_target_properties(${_smoke} PROPERTIES
+    BUILD_RPATH "$<TARGET_FILE_DIR:cudm_runtime_cu${_major}>;${CUDAQ_PULSE_CUDA${_major}_LIBRARY_DIRS}")
+  list(APPEND _cudaq_pulse_smoke_targets ${_smoke})
 
-add_test(NAME PulseCuDensityMatGpuSmoke COMMAND cudaq-pulse-cudm-smoke --gpu)
-set_tests_properties(PulseCuDensityMatGpuSmoke PROPERTIES LABELS "pulse;gpu")
+  add_test(NAME PulseCuDensityMatLinkSmokeCu${_major} COMMAND ${_smoke})
+  set_tests_properties(PulseCuDensityMatLinkSmokeCu${_major} PROPERTIES
+    LABELS "pulse;gpu-build")
+  add_custom_target(check-pulse-cudm-link-cu${_major}
+    COMMAND ${_smoke}
+    DEPENDS ${_smoke}
+    COMMENT "Checking cuDensityMat linkage for CUDA ${_major}"
+    USES_TERMINAL)
+  add_dependencies(check-pulse-cudm-link check-pulse-cudm-link-cu${_major})
 
+  add_test(NAME PulseCuDensityMatGpuSmokeCu${_major} COMMAND ${_smoke} --gpu)
+  set_tests_properties(PulseCuDensityMatGpuSmokeCu${_major} PROPERTIES
+    LABELS "pulse;gpu")
+endforeach()
+
+# The Python GPU suite runs against whichever runtime the loader selects from
+# the installed [cuNN] extra.
 add_test(NAME PulsePythonGpuTests COMMAND ${_cudaq_pulse_pytest_command} -m gpu)
 set_tests_properties(PulsePythonGpuTests PROPERTIES LABELS "pulse;gpu")
 
 add_custom_target(check-pulse-gpu
   COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure -L "^gpu$"
-  DEPENDS cudaq-pulse-cudm-smoke pulse
+  DEPENDS ${_cudaq_pulse_smoke_targets} pulse
   WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   COMMENT "Running cudaq-pulse cuDensityMat and numerical GPU tests"
   USES_TERMINAL)

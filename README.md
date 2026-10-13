@@ -20,17 +20,44 @@ linked MLIR, so `pip` is the only installer you need.
 ```bash
 python -m venv .venv && source .venv/bin/activate
 
-# Compiler only (Linux and macOS): compile kernels and inspect the MLIR.
+# Compiler only: compile kernels, inspect the MLIR, run cudaq-pulse-opt.
 pip install cudaq-pulse
 
-# Compiler plus GPU simulation (Linux x86_64 and aarch64): also installs
-# cuDensityMat and the CUDA 12 runtime libraries from PyPI.
-pip install "cudaq-pulse[gpu]"
+# Compiler plus GPU simulation (Linux), with the CUDA 12 or CUDA 13 libraries.
+pip install "cudaq-pulse[cu12]"
+pip install "cudaq-pulse[cu13]"
+
+# Check what was installed and whether it works.
+python -m cudaq_pulse.doctor
 ```
 
-GPU execution additionally needs an NVIDIA GPU (compute capability 7.0 or
-newer) and a driver that supports CUDA 12.9. No CUDA toolkit, cuQuantum SDK,
-or container is required.
+`[gpu]` is an alias for `[cu12]`. The `cu12` and `cu13` extras install into
+the same directories, so install only one of them per environment.
+
+| Platform | Python | What you get |
+| --- | --- | --- |
+| Linux x86_64 and aarch64, glibc 2.28+ | 3.10+ | Compiler; GPU execution with `[cu12]` or `[cu13]` |
+| macOS 11+ arm64 | 3.10+ | Compiler only |
+
+GPU execution needs an NVIDIA GPU (compute capability 7.0 or newer) and a
+driver for the CUDA major you installed:
+
+| Extra | Minimum Linux driver |
+| --- | --- |
+| `[cu12]` (or `[gpu]`) | 525.60.13 |
+| `[cu13]` | 580 |
+
+The driver is the only system requirement. The extras install cuDensityMat and
+the CUDA runtime libraries from PyPI, so no CUDA toolkit, cuQuantum SDK, or
+container is required.
+
+### Troubleshooting
+
+Run `python -m cudaq_pulse.doctor` first. It prints the version, the wheel
+platform, which CUDA extra is installed, each GPU library with its path or
+load error, and the driver version and device count. It exits non-zero if
+GPU execution does not work (`--allow-no-gpu` accepts a working compiler-only
+installation).
 
 Without a usable GPU, everything except execution still works. Execution fails
 with a specific error rather than degrading:
@@ -38,10 +65,12 @@ with a specific error rather than degrading:
 | Situation | Error raised by `pulse.evolve` / `CompiledKernel.run` |
 | --- | --- |
 | Wheel without GPU support (macOS, or a compiler-only source build) | `GpuSupportNotBuiltError` |
-| GPU support built in, but `[gpu]` libraries missing or unloadable | `GpuRuntimeLoadError` |
-| Libraries load, but no device or driver | `GpuDeviceUnavailableError` |
+| GPU support built in, but no CUDA extra, both extras, or a library fails to load | `GpuRuntimeLoadError` |
+| Libraries load, but no device, or the driver is too old | `GpuDeviceUnavailableError` |
 
-All three derive from `cudaq_pulse.runtime.gpu.GpuRuntimeError`.
+All three derive from `cudaq_pulse.runtime.gpu.GpuRuntimeError`. The runtime
+for CUDA 12 or 13 is chosen from the installed extra; set
+`CUDAQ_PULSE_CUDA=12` or `CUDAQ_PULSE_CUDA=13` to choose it explicitly.
 
 ## Quick example
 
@@ -95,9 +124,10 @@ immediately with the reason, instead of skipping them.
 ## Build from source
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). In short, `pip install .` from a
-clone builds a wheel locally after `python tools/fetch-mlir-toolchain.py` has
-downloaded the pinned, checksum-verified MLIR toolchain. Nothing else is
-built from source.
+clone builds a wheel locally against the pinned, checksum-verified MLIR
+toolchain, which CMake downloads on supported platforms (or set `MLIR_DIR` to
+your own MLIR 22 build). Nothing else is built from source. PyPI carries
+wheels only; the source distribution is attached to each GitHub release.
 
 ## Current scope and limitations
 

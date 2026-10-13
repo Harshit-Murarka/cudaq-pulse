@@ -10,7 +10,7 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    branches: [main, staging]
   pull_request:
   workflow_dispatch:
     inputs:
@@ -103,17 +103,20 @@ jobs:
           nvidia-smi
           nvcc --version
 
-      - name: Install the [gpu] runtime libraries
+      # The toolkit supplies the CUDA 12 runtime headers (crt/host_defines.h
+      # among them); the [cu12] wheels in site-packages supply cuDensityMat.
+      - name: Install the [cu12] runtime libraries
         run: |
-          uv pip install -r pyproject.toml --extra gpu
-          root="$(.venv/bin/python -c 'import cuquantum; print(cuquantum.__path__[0])')"
-          echo "CUDENSITYMAT_ROOT=$root" >> "$GITHUB_ENV"
+          uv pip install -r pyproject.toml --extra cu12
+          site="$(.venv/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
+          echo "CUDAQ_PULSE_CUDA12_ROOT=/usr/local/cuda-12.9;$site" >> "$GITHUB_ENV"
 
       - name: Configure
         run: >
           uv run --no-sync cmake -S . -B build/gpu -G Ninja
           -DCUDAQ_PULSE_BUILD_TESTS=ON
           -DCUDAQ_PULSE_ENABLE_GPU=ON
+          -DCUDAQ_PULSE_CUDA12_ROOT="$CUDAQ_PULSE_CUDA12_ROOT"
           -DPython3_EXECUTABLE="$PWD/.venv/bin/python"
 
       - name: check-pulse

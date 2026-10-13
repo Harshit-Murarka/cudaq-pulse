@@ -13,8 +13,9 @@ LLVM_VERSION = "@LLVM_PACKAGE_VERSION@"
 GPU_RUNTIME_ENABLED = @CUDAQ_PULSE_GPU_RUNTIME_ENABLED_PY@
 """Whether the cuDensityMat GPU runtime was built into this package."""
 
-GPU_RUNTIME_LIBRARY = @CUDAQ_PULSE_GPU_RUNTIME_LIBRARY_PY@
-"""Path of the bundled GPU runtime library, relative to the package directory."""
+GPU_RUNTIME_LIBRARIES: dict[int, str] = @CUDAQ_PULSE_GPU_RUNTIME_LIBRARIES_PY@
+"""Bundled GPU runtime per CUDA major, relative to the package directory."""
 
-CUDENSITYMAT_VERSION = @CUDAQ_PULSE_CUDENSITYMAT_VERSION_PY@
-CUDA_VERSION = @CUDAQ_PULSE_CUDA_VERSION_PY@
+CUDENSITYMAT_VERSIONS: dict[int, str] = @CUDAQ_PULSE_CUDENSITYMAT_VERSIONS_PY@
+CUDA_VERSIONS: dict[int, str] = @CUDAQ_PULSE_CUDA_VERSIONS_PY@
+"""cuDensityMat and CUDA runtime versions each GPU runtime was compiled against."""
