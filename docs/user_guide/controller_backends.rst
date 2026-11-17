@@ -781,7 +781,12 @@ Some instruments require a minimum pulse length.
 than 16 of the controller's cycles a violation naming its line, its start
 and its length; on a control system of several controllers, each checks
 its own lines. It is 0, no limit, by default, and the export lists it
-among the limits only when it is set.
+among the limits only when it is set. Likewise, an instrument that caps a
+pulse's length declares ``Controller(max_pulse_cycles=4095)``: every drive
+and readout longer than 4095 of the controller's cycles is a violation
+naming its line, its start and its length. It is ``None``, no limit, by
+default, may not be below ``min_pulse_cycles``, and is listed among the
+limits only when it is set.
 
 A controller that plays nothing while one of its classical calls is out
 declares ``Controller(blocks_on_calls=True)``. Each call then holds every

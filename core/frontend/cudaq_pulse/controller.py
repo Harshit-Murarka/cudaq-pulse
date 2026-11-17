@@ -2088,8 +2088,8 @@ def _native_check(
     # Any found sends the check to its walk, which counts the amplitudes too.
     if limits.max_amplitude is not None and not found:
         found.extend(_amplitude_violations(lowered, module, limits.max_amplitude, unresolved))
-    if limits.min_pulse_cycles and not found:
-        found.extend(_short_pulse_violations(lowered, module, limits))
+    if _checks_pulse_lengths(limits) and not found:
+        found.extend(_pulse_length_violations(lowered, module, limits))
     # A value a call sets is an update here; the walk tells it apart.
     if limits.update_buses and not found:
         found.extend(_bus_fast(lowered, module, limits))
@@ -2274,12 +2274,12 @@ def _violations(
                     unresolved.append(f"line {line}: tone frequencies")
         if limits.max_amplitude is not None:
             found.extend(_over_amplitude(lines[line], items, limits.max_amplitude, unresolved))
-        if limits.min_pulse_cycles:
+        if _checks_pulse_lengths(limits):
             for e in items:
                 duration = e["end_cycles"] - e["start_cycles"]
-                if duration < limits.min_pulse_cycles:
-                    before, after = _short_pulse(lines[line], e["kind"], duration, limits)
-                    found.append(f"{before}{e['start_cycles']}{after}")
+                violation = _pulse_length(lines[line], e["kind"], duration, limits)
+                if violation is not None:
+                    found.append(f"{violation[0]}{e['start_cycles']}{violation[1]}")
         if limits.waveform_memory_samples is not None:
             shapes = stored if shared else {}
             unknown_samples = 0
@@ -2710,20 +2710,33 @@ def _amplitude_violations(
     return [message for _, messages in sorted(by_line.items()) for message in messages]
 
 
-def _short_pulse(
+def _checks_pulse_lengths(limits: Controller) -> bool:
+    """Whether *limits* bound the length of a drive or readout."""
+    return bool(limits.min_pulse_cycles) or limits.max_pulse_cycles is not None
+
+
+def _pulse_length(
     line: Mapping[str, Any], kind: str, duration: int, limits: Controller
-) -> tuple[str, str]:
+) -> tuple[str, str] | None:
     """The violation of a *kind* of *duration* cycles on *line* shorter than
-    ``limits.min_pulse_cycles``, before and after its start."""
+    ``limits.min_pulse_cycles`` or longer than ``limits.max_pulse_cycles``,
+    before and after its start; ``None`` when its length is allowed."""
+    if duration < limits.min_pulse_cycles:
+        bound = f"none shorter than {limits.min_pulse_cycles} (Controller.min_pulse_cycles)"
+    elif limits.max_pulse_cycles is not None and duration > limits.max_pulse_cycles:
+        bound = f"none longer than {limits.max_pulse_cycles} (Controller.max_pulse_cycles)"
+    else:
+        return None
     return (
         f"line {line['line']} ({line['role']} of qudit {line['qudit']}): the {kind} at ",
-        f" lasts {duration} cycles; the controller plays none shorter than "
-        f"{limits.min_pulse_cycles} (Controller.min_pulse_cycles)",
+        f" lasts {duration} cycles; the controller plays {bound}",
     )
 
 
-def _short_pulse_violations(lowered: ScheduledKernel, module: Any, limits: Controller) -> list[str]:
-    """``_short_pulse`` on one clock, on the format /2 walk of *module*: a
+def _pulse_length_violations(
+    lowered: ScheduledKernel, module: Any, limits: Controller
+) -> list[str]:
+    """``_pulse_length`` on one clock, on the format /2 walk of *module*: a
     loop whose iterations repeat is checked once."""
     with lowered._lock:
         lines, events, _ = module.controller_program(
@@ -2732,12 +2745,14 @@ def _short_pulse_violations(lowered: ScheduledKernel, module: Any, limits: Contr
     found = []
     for event in _played(events):
         duration = event["duration_cycles"]
-        if duration is not None and duration < limits.min_pulse_cycles:
-            role, qudit = lines[event["line"]]
-            line = {"line": event["line"], "role": role, "qudit": qudit}
-            kind = _FLAT_KINDS.get(event["kind"], event["kind"])
-            before, after = _short_pulse(line, kind, duration, limits)
-            found.append(f"{before}{event['start_cycles']}{after}")
+        if duration is None:
+            continue
+        role, qudit = lines[event["line"]]
+        line = {"line": event["line"], "role": role, "qudit": qudit}
+        kind = _FLAT_KINDS.get(event["kind"], event["kind"])
+        violation = _pulse_length(line, kind, duration, limits)
+        if violation is not None:
+            found.append(f"{violation[0]}{event['start_cycles']}{violation[1]}")
     return found
 
 

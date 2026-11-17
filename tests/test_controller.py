@@ -527,6 +527,64 @@ def test_each_controller_of_a_system_checks_its_own_minimum_pulse_length():
     pulse.compile(short_pulses, control_system=system(0, 8)).lower(Q[0], Q[1])
 
 
+def test_a_controller_may_cap_the_length_of_a_pulse():
+    lowered = pulse.compile(short_pulses).lower(Q[0], Q[1])
+    assert check(lowered, Controller(max_pulse_cycles=100)) == []
+    assert check(lowered, Controller(max_pulse_cycles=99)) == [
+        "line 1 (readout of qudit 0): the readout at 24 lasts 100 cycles; the controller "
+        "plays none longer than 99 (Controller.max_pulse_cycles)",
+    ]
+    found = check(lowered, Controller(max_pulse_cycles=8))
+    assert [f.split(": the ")[1].split(" lasts")[0] for f in found] == [
+        "drive at 8",
+        "readout at 24",
+    ]
+    # Both bounds: each pulse is reported once, against the bound it breaks.
+    both = check(lowered, Controller(min_pulse_cycles=16, max_pulse_cycles=16))
+    assert [f.split(" lasts ")[1].split(" (")[0] for f in both] == [
+        "8 cycles; the controller plays none shorter than 16",
+        "100 cycles; the controller plays none longer than 16",
+        "8 cycles; the controller plays none shorter than 16",
+    ]
+    # In the controller's own cycles: the 100-cycle readout of the 2 GHz program
+    # clock lasts 50 cycles at 1 GHz.
+    assert check(lowered, Controller(clock_ghz=1.0, max_pulse_cycles=50)) == []
+    (own,) = check(lowered, Controller(clock_ghz=1.0, max_pulse_cycles=49))
+    assert "the readout at 12 lasts 50 cycles" in own
+    machine = ControlSystem(controllers=[Controller(max_pulse_cycles=64)])
+    with pytest.raises(ControllerLimitError, match=r"lasts 100 cycles; .* longer than 64 \("):
+        pulse.compile(short_pulses, control_system=machine).lower(Q[0], Q[1])
+    machine = ControlSystem(controllers=[Controller(max_pulse_cycles=128)])
+    program = pulse.compile(short_pulses, control_system=machine).lower(Q[0], Q[1])
+    assert program.export_to_controller()["limits"]["max_pulse_cycles"] == 128
+    assert program.export_to_controller(version=2)["controller"]["max_pulse_cycles"] == 128
+    assert "max_pulse_cycles" not in Controller().as_dict()
+    for wrong in (0, -1, 1.5, True, "8"):
+        with pytest.raises(
+            pulse.InvalidValueError, match="max_pulse_cycles must be None or an int"
+        ):
+            Controller(max_pulse_cycles=wrong)  # type: ignore[arg-type]
+    with pytest.raises(pulse.InvalidValueError, match=r"at least min_pulse_cycles \(16\), got 8"):
+        Controller(min_pulse_cycles=16, max_pulse_cycles=8)
+    Controller(min_pulse_cycles=16, max_pulse_cycles=16)
+
+
+def test_each_controller_of_a_system_checks_its_own_maximum_pulse_length():
+    def system(first, second):
+        return ControlSystem(
+            controllers=[
+                Controller(drive_lines=[0], readout_lines=[0], max_pulse_cycles=first),
+                Controller(drive_lines=[1], readout_lines=[1], max_pulse_cycles=second),
+            ]
+        )
+
+    with pytest.raises(ControllerLimitError) as caught:
+        pulse.compile(short_pulses, control_system=system(64, None)).lower(Q[0], Q[1])
+    (violation,) = caught.value.violations
+    assert "(readout of qudit 0): the readout at 24 lasts 100 cycles" in violation
+    pulse.compile(short_pulses, control_system=system(None, 8)).lower(Q[0], Q[1])
+
+
 def _after_a_loop(n: int) -> pulse.Kernel:
     @pulse.kernel
     def after(q, r):

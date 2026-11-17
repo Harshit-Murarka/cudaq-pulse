@@ -188,6 +188,16 @@ def test_a_rolled_loop_reports_each_short_pulse():
     assert check(lowered, Controller(min_pulse_cycles=5)) == []
 
 
+def test_a_rolled_loop_reports_each_long_pulse():
+    lowered = pulse.compile(close).lower(Q[0])
+    assert check(lowered, Controller(max_pulse_cycles=5)) == [
+        f"line 0 (drive of qudit 0): the drive at {13 * k + 5} lasts 8 cycles; the controller "
+        "plays none longer than 5 (Controller.max_pulse_cycles)"
+        for k in range(3000)
+    ]
+    assert check(lowered, Controller(max_pulse_cycles=8)) == []
+
+
 def test_a_rolled_loop_of_a_few_iterations_compiles_under_a_controller_in_a_child():
     assert _in_a_child("drives", 1000) == {"ops": 5}
 
