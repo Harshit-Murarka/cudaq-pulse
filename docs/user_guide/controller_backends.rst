@@ -580,8 +580,14 @@ user, in the reader's cycles, and both controllers' start uncertainty.
 ``rcp`` and ``alap_rcp`` wait that long for each pair of reader and user,
 and a pulse on the reader's own controller waits its feedback latency
 alone; a program that starts the pulse sooner fails to compile with the
-cycle it may start at. An answer taken on another controller than the one
-that sent the request is budgeted with the two controllers' start
+cycle it may start at. A reader whose outcomes cannot reach a controller
+at all (controllers in different sync domains, say) gives that receiver
+``None`` in its ``peer_latency_cycles``,
+``Controller(peer_latency_cycles={3: None})``: a pulse there that branches
+on, or computes with, one of its readouts then fails to compile, naming
+both controllers, however long it waits. An answer taken on another
+controller than the one that sent the request is budgeted with the two
+controllers' start
 uncertainty, and ``due_cycles`` includes it; one controller sending and
 taking it adds none. When the scheduler cannot tell which controllers they
 are (the request carries no measurement, or the answer leaves the kernel),

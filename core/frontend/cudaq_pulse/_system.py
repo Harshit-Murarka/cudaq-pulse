@@ -778,7 +778,10 @@ class Controller:
     ``peer_latency_cycles`` is the time an outcome this controller reads
     takes to reach another controller, in this controller's own cycles: one
     number for every receiver, or a mapping from the receiving controller's
-    index in the system (a receiver it does not list: 0).
+    index in the system (a receiver it does not list: 0). ``None`` for a
+    receiver means its outcomes cannot reach it (controllers in different
+    sync domains, say): a pulse there that branches on, or computes with, one
+    of its readouts is a violation naming both.
     ``clock_skew_cycles`` bounds how far its clock is from the system's.
     ``supports`` lists its capabilities (``None``: everything); a program
     that needs one it lacks fails to compile. ``backend`` is the controller
@@ -813,7 +816,7 @@ class Controller:
     readout_lines: Sequence[ReadoutLine | int] = ()
     update_buses: Sequence[UpdateBus] = ()
     space_updates: bool = False
-    peer_latency_cycles: int | Mapping[int, int] = 0
+    peer_latency_cycles: int | Mapping[int, int | None] = 0
     clock_skew_cycles: int = 0
     supports: Sequence[Capability | str] | None = None
     backend: str | None = None
@@ -910,7 +913,9 @@ class Controller:
                 "peer_latency_cycles",
                 MappingProxyType(
                     {
-                        _cycles(k, "peer_latency_cycles keys"): _cycles(v, "peer_latency_cycles")
+                        _cycles(k, "peer_latency_cycles keys"): (
+                            None if v is None else _cycles(v, "peer_latency_cycles")
+                        )
                         for k, v in peers.items()
                     }
                 ),
@@ -1116,6 +1121,13 @@ def _takers(
 def _label(index: int, controller: Controller) -> str:
     name = f"controllers[{index}]"
     return f"{name} ({controller.model})" if controller.model else name
+
+
+def _peer(source: Controller, user: int) -> int | None:
+    """The ``peer_latency_cycles`` from *source* to controller *user*;
+    ``None`` when its outcomes cannot reach it."""
+    peers = source.peer_latency_cycles
+    return peers.get(user, 0) if isinstance(peers, Mapping) else peers
 
 
 @dataclass(frozen=True)
@@ -1420,10 +1432,9 @@ class ControlSystem:
             longest = max(longest, source.feedback_latency_cycles / ratio)
             if uncertainty is None:
                 continue
-            peers = source.peer_latency_cycles
             for user in users:
-                if user != reader:
-                    peer = peers.get(user, 0) if isinstance(peers, Mapping) else peers
+                peer = _peer(source, user)
+                if user != reader and peer is not None:
                     latency = (source.feedback_latency_cycles + peer) / ratio
                     longest = max(longest, latency + uncertainty[reader] + uncertainty[user])
         return math.ceil(longest)
@@ -1454,13 +1465,14 @@ class ControlSystem:
         table = []
         for reader, source in enumerate(controllers):
             ratio = Fraction(1) if clocks is None else clocks.controllers[reader].ratio
-            peers = source.peer_latency_cycles
             row = []
             for user in range(len(controllers)):
                 if user == reader:
                     row.append(math.ceil(source.feedback_latency_cycles / ratio))
                     continue
-                peer = peers.get(user, 0) if isinstance(peers, Mapping) else peers
+                # A receiver it cannot reach waits as one it reaches at once;
+                # a program that forwards to it is refused (``_forwarding``).
+                peer = _peer(source, user) or 0
                 latency = (source.feedback_latency_cycles + peer) / ratio
                 row.append(math.ceil(latency + uncertainty[reader] + uncertainty[user]))
             table.append(row)
@@ -1572,8 +1584,17 @@ class ControlSystem:
                 if uncertainty is None:
                     uncertainty = self._start_uncertainty(clocks)
                 source = self.controllers[reader]
-                peers = source.peer_latency_cycles
-                peer = peers.get(user, 0) if isinstance(peers, Mapping) else peers
+                peer = _peer(source, user)
+                if peer is None:
+                    found.append(
+                        f"{_label(user, self.controllers[user])}: the {event['kind']} on line "
+                        f"{event['line']} at {event['start_cycles']} {verb} the readout of "
+                        f"{_label(reader, source)} ending at {readout['end_cycles']}, whose "
+                        f"outcome cannot reach it (its peer_latency_cycles gives controller "
+                        f"{user} None); play the pulse on a controller the reader reaches, or "
+                        "read the qudit on this one"
+                    )
+                    continue
                 ratio = Fraction(1) if clocks is None else clocks.controllers[reader].ratio
                 latency = (source.feedback_latency_cycles + peer) / ratio
                 spread = uncertainty[reader] + uncertainty[user]

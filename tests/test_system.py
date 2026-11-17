@@ -168,6 +168,62 @@ def test_rcp_waits_the_feedback_latency_of_the_controllers():
     assert shared._machine.readout_latency_cycles == 50
 
 
+@pulse.kernel
+def branch_across(q, r):
+    ro = get_readout_line(q)
+    d = get_drive_line(r)
+    m = readout(ro, square(100, 0.05))
+    sync(ro, d)
+    wait(d, 400)
+    if m:
+        drive(d, square(20, 0.3))
+
+
+def _domains(**first):
+    """Two boxes; the first's outcomes cannot reach the second."""
+    a = pulse.Controller(
+        drive_lines=[0, 1], readout_lines=[0, 1], model="box.a", peer_latency_cycles={1: None}
+    )
+    return dataclasses.replace(a, **first), _two_boxes()[1]
+
+
+def test_a_controller_may_not_reach_a_peer():
+    a, b = _domains()
+    assert a.peer_latency_cycles == {1: None}
+    qpu = _qpu(a, b)
+    q = qpu.qudits
+    with pytest.raises(ControllerLimitError) as caught:
+        pulse.compile(branch_across, quantum_system=qpu).lower(q[0], q[2])
+    assert list(caught.value.violations) == [
+        "controllers[1] (box.b): the drive on line 1 at 500 branches on the readout of "
+        "controllers[0] (box.a) ending at 100, whose outcome cannot reach it (its "
+        "peer_latency_cycles gives controller 1 None); play the pulse on a controller the "
+        "reader reaches, or read the qudit on this one"
+    ]
+    # rcp cannot wait for it either.
+    with pytest.raises(ControllerLimitError, match="cannot reach it"):
+        pulse.compile(branch_across, quantum_system=qpu, schedule="rcp").lower(q[0], q[2])
+    # The other way, and on one controller, outcomes reach.
+    pulse.compile(branch_across, quantum_system=qpu).lower(q[2], q[0])
+    pulse.compile(branch_across, quantum_system=qpu).lower(q[0], q[1])
+    # An unreachable peer is no worse a latency for the outcomes that do reach.
+    assert (
+        ControlSystem(controllers=[a, b])._machine.readout_latency_cycles
+        == ControlSystem(controllers=list(_two_boxes()))._machine.readout_latency_cycles
+    )
+
+
+def test_an_unreachable_peer_is_written_and_read_back():
+    a, b = _domains(peer_latency_cycles={1: None})
+    assert a.as_dict()["peer_latency_cycles"] == {"1": None}
+    qpu = _qpu(a, b)
+    data = json.loads(json.dumps(qpu.as_dict()))
+    assert pulse.QuantumSystem.from_dict(data).control_system.controllers[0] == a
+    for wrong in (None, {1: -1}, {1: 1.5}):
+        with pytest.raises((TypeError, ValueError), match="peer_latency_cycles"):
+            pulse.Controller(peer_latency_cycles=wrong)  # type: ignore[arg-type]
+
+
 # ── Compiling for a control system ───────────────────────────────────────────
 
 

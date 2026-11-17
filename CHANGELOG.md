@@ -122,6 +122,13 @@ release's `## [X.Y.Z] - Unreleased`, in the pull request that makes it.
   once when scrolled into view, with Replay and step buttons, and its data
   comes from what the page compiles and simulates. Readers without
   JavaScript, or who ask for reduced motion, see the still frame.
+- **Peers a controller cannot reach.** `Controller.peer_latency_cycles` may
+  give a receiving controller `None`: the reader's outcomes cannot reach it
+  (controllers in different sync domains, say). A pulse there that branches
+  on, or computes with, one of its readouts fails to compile with a
+  `ControllerLimitError` naming both controllers, where it was scheduled as
+  if the outcome arrived at once (a receiver a mapping leaves out still
+  gets 0). It is written to and read from system files as `null`.
 
 ### Changed
 
