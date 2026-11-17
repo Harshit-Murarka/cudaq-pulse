@@ -136,6 +136,15 @@ release's `## [X.Y.Z] - Unreleased`, in the pull request that makes it.
 
 ### Fixed
 
+- **Instruction memory of a controller that unrolls loops.** A controller
+  without the `"loop"` capability plays a rolled loop unrolled, and
+  `max_pulses` already counted each iteration for it; `max_instructions`
+  counted the loop's body once, so a program larger than the controller's
+  instruction memory compiled. It now counts what the controller holds, as
+  many operations as the program unrolled, and a loop that takes the program
+  past the limit is a `CompilationError` naming its iterations and their
+  operations. Controllers that run loops, and programs without rolled loops,
+  are unchanged.
 - A frame change made after a wait on its tone's line acted where the
   tone's previous drive or readout ended, before the wait:
   `shift_frequency(tone, +d)`, a wait of `T` and `shift_frequency(tone, -d)`

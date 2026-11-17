@@ -254,7 +254,11 @@ its size has no limit of its own. A controller given
 the kernel traces them: tracing stops as soon as the program grows past
 them, with a ``CompilationError`` at the line of the loop that unrolled it,
 naming the loop, about how many operations it unrolls to and the limit. A
-rolled loop holds its body once.
+rolled loop holds its body once on a controller that runs loops itself;
+one that does not support ``"loop"`` plays it unrolled, so it holds the
+body once per iteration, as many operations as the program unrolled, and a
+loop that takes it past ``n`` is a ``CompilationError`` naming its
+iterations and their operations. The loop stays rolled in the program.
 
 **Program length.** A program runs at most its controller's
 ``Controller(max_program_duration=...)``, a time or a number of ns,

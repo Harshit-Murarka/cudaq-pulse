@@ -726,9 +726,10 @@ class Controller:
     that supports ``"loop"`` holds a rolled loop's body once.
     ``max_instructions``: the operations one program may hold, as the
     kernel traces them (``None``: no limit). An unrolled loop holds its
-    body once per iteration, a rolled one once; tracing stops when the
-    program grows past the limit, and the error names the loop that
-    unrolled it. Exports list it among the limits only when it is set.
+    body once per iteration, a rolled one once, or once per iteration on a
+    controller without ``"loop"``, which plays it unrolled; tracing stops
+    when the program grows past the limit, and the error names the loop
+    that unrolled it. Exports list it among the limits only when it is set.
     ``max_program_duration``: the longest program the controller runs, a
     time or a number of ns (``None``: no limit); the compiler sums the
     program op after op, every iteration of its loops, and a program longer

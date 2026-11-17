@@ -437,6 +437,10 @@ class PackedIRBuilder:
         # The controller's Controller.max_instructions; set it with
         # limit_instructions().
         self.max_instructions: int | None = None
+        # Whether that controller plays rolled loops unrolled, holding a
+        # body once per iteration, and the ops it so holds beyond those traced.
+        self.loops_unrolled = False
+        self._unrolled_ops = 0
         # Unrolled loop id -> (iterations done, op count) at the last check.
         self._limit_checks: dict[int, tuple[int, int]] = {}
         # What the traced kernel returned.
@@ -469,19 +473,22 @@ class PackedIRBuilder:
     def _check_instructions(self, n: int, limit: int) -> None:
         # Every op writes at least one word after counting itself, so the
         # op past the limit reaches the cap set here, or an earlier one.
-        if self._op_count > limit:
+        held = self._op_count + self._unrolled_ops
+        if held > limit:
             from ._emitter import instruction_limit_error
 
-            raise instruction_limit_error(self._op_count, limit, self._limit_checks)
+            raise instruction_limit_error(held, limit, self._limit_checks)
         from ._emitter import note_unrolled_progress
 
-        note_unrolled_progress(self._op_count, self._limit_checks)
-        self._cap = min(self._cap, self._cur + n + limit - self._op_count + 1)
+        note_unrolled_progress(held, self._limit_checks)
+        self._cap = min(self._cap, self._cur + n + limit - held + 1)
 
-    def limit_instructions(self, limit: int | None) -> None:
+    def limit_instructions(self, limit: int | None, loops_unrolled: bool = False) -> None:
         """Stop tracing with a ``CompilationError`` once the program holds
-        more than *limit* ops (``None``: no limit)."""
+        more than *limit* ops (``None``: no limit); with *loops_unrolled*,
+        a rolled loop holds its body once per iteration."""
         self.max_instructions = limit
+        self.loops_unrolled = loops_unrolled
         self._cap = 0
         self._ensure(0)
 
@@ -861,7 +868,12 @@ class PackedIRBuilder:
             ub = _as_i64(attrs.get("ub", 0), "loop upper bound")
             step = _as_i64(attrs.get("step", 1), "loop step")
             self._record(_FOR_BEGIN, [lb, ub, step])
-            self._regions.append({"cached": len(self._numeric_vids)})
+            region = {"cached": len(self._numeric_vids)}
+            if self.loops_unrolled:
+                past = step - (1 if step > 0 else -1)
+                region["trips"] = max(0, (ub - lb + past) // step) if step else 0
+                region["held"] = self._op_count + self._unrolled_ops
+            self._regions.append(region)
             self._open_scope(loop=True)
         elif kind == "scf.for_end":
             self._close_scope()
@@ -871,6 +883,8 @@ class PackedIRBuilder:
             inits = [v.vid if v.vid != UNDEFINED_VID else -1 for v in operands]
             yields = list(region.get("yield", ()))
             self._record(_FOR_END, [len(results), *inits, *yields, *(r.vid for r in results)])
+            if "held" in region:
+                self._hold_iterations(region["trips"], region["held"])
         elif kind == "scf.if":
             self._record(_IF_BEGIN, [operands[0].vid])
             self._regions.append({"cached": len(self._numeric_vids)})
@@ -899,6 +913,20 @@ class PackedIRBuilder:
         else:
             raise CompilationError(f"unsupported structured control flow op {kind!r}")
         return results
+
+    def _hold_iterations(self, trips: int, held_before: int) -> None:
+        """Count the rolled loop just closed as a controller that plays it
+        unrolled holds it: *trips* times the ops of its body (those held
+        since *held_before*, its opening op), and not the loop's own two."""
+        body = self._op_count + self._unrolled_ops - held_before - 1
+        self._unrolled_ops += (trips - 1) * body - 2
+        limit = self.max_instructions
+        if limit is not None and self._op_count + self._unrolled_ops > limit:
+            from ._emitter import unrolled_instruction_error
+
+            raise unrolled_instruction_error(
+                self._op_count + self._unrolled_ops, limit, trips, body
+            )
 
     def _forget(self, cached: int) -> None:
         """Keep the first *cached* numbers materialized: the later ones are
@@ -1175,6 +1203,7 @@ class PackedIRBuilder:
             list(self._scope),
             list(self._flow),
             self._next_scope,
+            self._unrolled_ops,
         )
 
     def rollback(self, checkpoint: tuple[Any, ...]) -> None:
@@ -1191,6 +1220,7 @@ class PackedIRBuilder:
             scope,
             flow,
             self._next_scope,
+            self._unrolled_ops,
         ) = checkpoint
         self._regions = regions
         if self.max_instructions is not None:

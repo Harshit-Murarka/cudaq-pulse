@@ -401,6 +401,69 @@ def test_a_rolled_loop_holds_its_body_once_against_the_instruction_memory():
     assert pulse.compile(rolled, control_system=_holding(ops)).lower(Q[0]).metrics.op_count == ops
 
 
+_NO_LOOP = ["play", "readout", "wait", "sync"]
+
+
+def _holding_unrolled(n, loops=False):
+    supports = [*_NO_LOOP, "loop"] if loops else _NO_LOOP
+    return ControlSystem(controllers=[Controller(max_instructions=n, supports=supports)])
+
+
+@pulse.kernel
+def rolled_pair(q):
+    d = get_drive_line(q)
+    for _ in range(1000):
+        wait(d, 4)
+        wait(d, 8)
+
+
+@pulse.kernel
+def rolled_nested(q):
+    d = get_drive_line(q)
+    for _ in range(10):
+        for _ in range(100):
+            wait(d, 4)
+
+
+@pytest.mark.parametrize(
+    ("kernel", "held", "loop"),
+    [
+        (rolled_pair, 2001, "1,000 iterations of 2 operations"),
+        (rolled_nested, 1001, "10 iterations of 100 operations"),
+    ],
+)
+def test_a_controller_without_loop_holds_a_rolled_loop_once_per_iteration(kernel, held, loop):
+    # It plays the loop unrolled, so it holds what the program holds unrolled:
+    # the line and each iteration's waits, without the loop's own operations.
+    ops = kernel.lower(Q[0]).metrics.op_count
+    assert ops < 10
+    lowered = pulse.compile(kernel, control_system=_holding_unrolled(held)).lower(Q[0])
+    assert lowered.metrics.op_count == ops
+    with pytest.raises(CompilationError) as info:
+        pulse.compile(kernel, control_system=_holding_unrolled(held - 1)).lower(Q[0])
+    assert str(info.value) == (
+        f"the program holds {held:,} operations, more than the {held - 1:,} the controller "
+        "holds (Controller.max_instructions): it does not support 'loop', so it plays a "
+        f"rolled loop of {loop} unrolled"
+    )
+    assert info.value.code == "limit_exceeded"
+    # A controller that runs loops holds the body once.
+    pulse.compile(kernel, control_system=_holding_unrolled(ops, loops=True)).lower(Q[0])
+
+
+def test_a_rolled_loop_of_no_iterations_holds_nothing_on_a_controller_without_loop():
+    @pulse.kernel
+    def never(q, n: int):
+        d = get_drive_line(q)
+        for _ in range(n):
+            wait(d, 4)
+        wait(d, 8)
+
+    pulse.compile(never, control_system=_holding_unrolled(2)).lower(Q[0], 0)
+    with pytest.raises(CompilationError, match="holds 3 operations, more than the 2"):
+        pulse.compile(never, control_system=_holding_unrolled(2)).lower(Q[0], 1)
+
+
 def test_a_program_past_the_instruction_memory_outside_any_loop_says_so():
     @pulse.kernel
     def straight(q):

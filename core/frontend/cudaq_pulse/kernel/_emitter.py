@@ -1020,6 +1020,19 @@ def instruction_limit_error(
     return error
 
 
+def unrolled_instruction_error(held: int, limit: int, trips: int, body: int) -> CompilationError:
+    """The error for a program that holds *held* ops, past the controller's
+    *limit*, once a rolled loop of *trips* iterations of *body* ops is held
+    once per iteration, as a controller without ``loop`` holds it."""
+    return CompilationError(
+        f"the program holds {held:,} operations, more than the {limit:,} the controller "
+        "holds (Controller.max_instructions): it does not support 'loop', so it plays a "
+        f"rolled loop of {trips:,} iterations of {body:,} operation{'s' if body != 1 else ''} "
+        "unrolled",
+        code="limit_exceeded",
+    )
+
+
 def add_source_note(e: BaseException, heading: str | None = None) -> None:
     """Add a note to *e* with the kernel source lines that raised it, as a
     traceback shows them: the kernel's own line first."""

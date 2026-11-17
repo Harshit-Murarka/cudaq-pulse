@@ -1395,7 +1395,9 @@ def _clocked_builder(
     if controller is not None:
         builder.sample_rate = _clocks.sample_rate(controller, target.clock_ghz)
         if controller.max_instructions is not None:
-            builder.limit_instructions(controller.max_instructions)
+            builder.limit_instructions(
+                controller.max_instructions, loops_unrolled=not controller._runs_loops
+            )
         if controller.max_program_duration is not None:
             builder.limit_cycles(
                 max(1, math.floor(controller.max_program_duration * target.clock_ghz + 1e-9))

@@ -20,7 +20,7 @@ class Capability(enum.StrEnum):
     to another controller, which branches on it; ``loop``: run a rolled
     loop itself, holding its body once. A controller without ``loop`` plays
     a rolled loop unrolled, so each iteration counts against its
-    ``max_pulses``. Unrolling does not change its waveform memory: a
+    ``max_pulses`` and ``max_instructions``. Unrolling does not change its waveform memory: a
     waveform is stored once per shape however often it plays, so only the
     pulse count goes up.
     """
