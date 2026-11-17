@@ -107,6 +107,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "FORMAT",
+    "FORMAT_2",
     "ControllerLimitError",
     "ControllerUsage",
     "DriveLine",
@@ -133,11 +134,12 @@ __all__ = [
     "unroll",
 ]
 
+#: The format of ``export_to_controller()``, version 1.
 FORMAT = "cudaq-pulse.controller/1"
-# The structured format, ``export_to_controller(version=2)``.
-_STRUCTURED = "cudaq-pulse.controller/2"
+#: The structured format, ``export_to_controller(version=2)``.
+FORMAT_2 = "cudaq-pulse.controller/2"
 # Every format this cudaq-pulse writes.
-_FORMATS = (FORMAT, _STRUCTURED)
+_FORMATS = (FORMAT, FORMAT_2)
 # The names format /2 gives a link's fields where they differ from the /1
 # names; unroll() turns them back.
 _LINK_KEYS: Mapping[str, str] = MappingProxyType(
@@ -869,7 +871,7 @@ def _native_frequencies(program: dict[str, Any], quantum_system: Any) -> None:
     (``native_frequency_hz``), format /2 one for each of its ``qudits``
     (``native_frequencies_hz``)."""
     lines = program["lines"]
-    structured = program["format"] == _STRUCTURED
+    structured = program["format"] == FORMAT_2
     reached = [q for line in lines for q in (line["qudits"] if structured else (line["qudit"],))]
     if not reached:
         return
@@ -1123,7 +1125,7 @@ def _export_structured(
         samples_of = _add_samples(events, sample_rate_ghz, clock, waveforms, ratio)
     base = emulation(lowered, False)
     program: dict[str, Any] = {
-        "format": _STRUCTURED,
+        "format": FORMAT_2,
         "quantum_system": lowered.quantum_system.name,
         "clock_ghz": clock,
     }
@@ -1274,7 +1276,7 @@ def unroll(program: Mapping[str, Any]) -> dict[str, Any]:
     """
     if program["format"] == FORMAT:
         return dict(program)
-    if program["format"] != _STRUCTURED:
+    if program["format"] != FORMAT_2:
         raise InvalidValueError(f"cannot unroll format {program['format']!r}")
     flat_lines, handle_of, handles = _handles(program)
     qudit_of = {line["line"]: line["qudits"][0] for line in program["lines"]}
@@ -3061,6 +3063,7 @@ class ControllerNames(Protocol):
     satisfies of ``ControllerModule``, which it can't be called as."""
 
     FORMAT: str
+    FORMAT_2: str
     ControllerLimitError: type[ControllerLimitError]
     Event: type[Event]
     FunctionCost: type[FunctionCost]
