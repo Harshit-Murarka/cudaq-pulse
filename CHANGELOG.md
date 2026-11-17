@@ -122,6 +122,16 @@ release's `## [X.Y.Z] - Unreleased`, in the pull request that makes it.
   once when scrolled into view, with Replay and step buttons, and its data
   comes from what the page compiles and simulates. Readers without
   JavaScript, or who ask for reduced motion, see the still frame.
+- **Amplitude of a shared line's output.** `Controller(max_line_amplitude=...)`
+  bounds the output of each shared line: the sum of the envelopes'
+  magnitudes of the tones it plays at once, which their phases reach where
+  they line up. A line whose tones sum above it is a `ControllerLimitError`
+  naming the line, the cycle and the qudits, in rolled loops (every
+  iteration) and with `controller.check` too; tones in different arms of a
+  branch never sum. `max_amplitude` stays the limit of each tone. The
+  default, `None`, is no limit, and the export lists the key among the
+  limits only when it is set, so existing programs and exports are
+  unchanged.
 
 ### Changed
 

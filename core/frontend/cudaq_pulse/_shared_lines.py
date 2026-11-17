@@ -331,6 +331,163 @@ class _AtOnce:
         )
 
 
+class _Summed:
+    """The tones a shared line plays whose envelopes sum past the
+    controller's ``max_line_amplitude``: how often a tone starts such a sum,
+    and the first time. The line's output is the sum of its tones; at the
+    phases where they line up, which tones of different frequencies reach,
+    its magnitude is the sum of their envelopes' magnitudes, so that sum is
+    what must stay within the limit."""
+
+    __slots__ = ("line", "most", "count", "first", "peak", "playing", "unresolved", "_envelopes")
+
+    # Samples per cycle the envelopes are summed at, as their peaks are found.
+    _RATE = 8
+    # Branch arms beyond which the tones at once are summed on every path
+    # together: an upper bound.
+    _MAX_ARMS = 10
+
+    def __init__(self, line: Physical, most: float, unresolved: list[str] | None) -> None:
+        self.line = line
+        self.most = most
+        self.count = 0
+        self.first: int | None = None
+        self.peak = 0.0
+        self.playing: list[Mapping[str, Any]] = []
+        self.unresolved = unresolved
+        self._envelopes: dict[str, Any] = {}
+
+    def _envelope(self, event: Mapping[str, Any]) -> Any:
+        """The magnitude of *event*'s envelope, ``_RATE`` samples per cycle
+        over its duration, or ``None`` when it is not built from numbers."""
+        from .controller import _span, sample_waveform
+
+        tree = event.get("waveform")
+        key = repr(tree)
+        if key not in self._envelopes:
+            span = None if tree is None else _span(tree)
+            found = None
+            if tree is not None and span is not None:
+                try:
+                    found = abs(sample_waveform(tree, math.ceil(span), self._RATE))
+                except (ValueError, TypeError, KeyError):
+                    found = None
+            if found is None and tree is not None and self.unresolved is not None:
+                self.unresolved.append(f"{self.line.label}: amplitude")
+                self.unresolved = None
+            self._envelopes[key] = found
+        return self._envelopes[key]
+
+    def sweep(self, played: Sequence[tuple[int, int, Mapping[str, Any], Any]]) -> None:
+        """Count *played* ((start, end, event, copy)), sorted by start: each
+        tone summed with those still playing when it starts, on every path
+        through the branches they lie in."""
+        import numpy as np
+
+        from .controller import _exclusive
+
+        active: list[tuple[int, int, Mapping[str, Any], Any]] = []
+        for item in played:
+            start, end, event, copy = item
+            active = [a for a in active if a[1] > start]
+            mine = self._envelope(event)
+            together = [a for a in active if a[3] != copy or not _exclusive(a[2], event)]
+            active.append(item)
+            if mine is None:
+                continue
+            envelopes = [(a, self._envelope(a[2])) for a in together]
+            envelopes = [(a, e) for a, e in envelopes if e is not None]
+            bound = float(mine.max(initial=0.0)) + sum(
+                float(e.max(initial=0.0)) for _, e in envelopes
+            )
+            if bound <= self.most:
+                continue
+            width = (end - start) * self._RATE
+            own = np.zeros(width)
+            own[: min(width, len(mine))] = mine[:width]
+            others = []
+            for (a_start, _, _, _), envelope in envelopes:
+                row = np.zeros(width)
+                skip = (start - a_start) * self._RATE
+                part = envelope[skip : skip + width]
+                row[: len(part)] = part
+                others.append(row)
+            best, members = 0.0, []
+            for chosen in self._paths(item, [a for a, _ in envelopes]):
+                total = own + sum((others[k] for k in chosen), np.zeros(width))
+                peak = float(total.max(initial=0.0))
+                if peak > best:
+                    best, members = peak, chosen
+            if best <= self.most:
+                continue
+            if self.first is None or start < self.first:
+                self.first = start
+                self.peak = best
+                self.playing = [envelopes[k][0][2] for k in members] + [event]
+            self.count += 1
+
+    def _paths(
+        self,
+        item: tuple[int, int, Mapping[str, Any], Any],
+        together: Sequence[tuple[int, int, Mapping[str, Any], Any]],
+    ) -> list[list[int]]:
+        """The indices into *together* of the tones that play with *item* on
+        each path through the branches they lie in: a set of tones of which
+        no two lie in different arms of one branch execution."""
+        from .controller import _exclusive
+
+        clashes = [
+            (j, k)
+            for j in range(len(together))
+            for k in range(j + 1, len(together))
+            if together[j][3] == together[k][3] and _exclusive(together[j][2], together[k][2])
+        ]
+        if not clashes:
+            return [list(range(len(together)))]
+        arms: dict[Any, None] = {}
+        for _, _, event, copy in (item, *together):
+            for c in event["conditions"]:
+                arms[(copy, c["branch"], tuple(event["iteration"]))] = None
+        keys = list(arms)
+        if len(keys) > self._MAX_ARMS:
+            return [list(range(len(together)))]
+        paths = []
+        for bits in range(1 << len(keys)):
+            taken = {key: bool(bits >> n & 1) for n, key in enumerate(keys)}
+
+            def on(
+                entry: tuple[int, int, Mapping[str, Any], Any], taken: dict[Any, bool] = taken
+            ) -> bool:
+                _, _, event, copy = entry
+                return all(
+                    taken[(copy, c["branch"], tuple(event["iteration"]))] == c["arm"]
+                    for c in event["conditions"]
+                )
+
+            if on(item):
+                paths.append([k for k, entry in enumerate(together) if on(entry)])
+        return paths
+
+    def message(self, lines: Sequence[Mapping[str, Any]]) -> str | None:
+        if not self.count:
+            return None
+        playing = self.playing
+        qudits = ", ".join(str(lines[e["line"]]["qudit"]) for e in playing)
+        if len(playing) == 1:
+            what = f"the {playing[0]['kind']} of qudit {qudits}"
+        else:
+            kinds = " and ".join(k + "s" for k in sorted({e["kind"] for e in playing}))
+            what = f"the sum of the {kinds} of qudits {qudits} it plays at once"
+        more = self.count - 1
+        again = f", and does so {more} more time{'s' if more > 1 else ''}" if more else ""
+        return (
+            f"{self.line.label} reaches amplitude {self.peak:.6g} from cycle {self.first}, "
+            f"{what}{again}; the controller plays at most {self.most:g} on a line "
+            "(Controller.max_line_amplitude): lower their amplitudes, or play some after the "
+            "others end"
+        )
+
+
 def _per_line(
     lowered: ScheduledKernel,
     line: Physical,
@@ -397,15 +554,25 @@ def violations(
         played = [e for e in events if _timed(e, handles)]
         if len(handles) < 2:
             continue
-        at_once = _AtOnce(line)
-        at_once.sweep(
-            sorted(((e["start_cycles"], e["end_cycles"], e, 0) for e in played), key=_first)
-        )
-        message = at_once.message(lines)
-        if message is not None:
-            found.append(message)
-        found.extend(_per_line(lowered, line, system.controllers[line.owner], played, unresolved))
+        controller = system.controllers[line.owner]
+        sweeps = _sweeps(line, controller, unresolved)
+        ordered = sorted(((e["start_cycles"], e["end_cycles"], e, 0) for e in played), key=_first)
+        for each in sweeps:
+            each.sweep(ordered)
+        found.extend(m for m in (each.message(lines) for each in sweeps) if m is not None)
+        found.extend(_per_line(lowered, line, controller, played, unresolved))
     return found
+
+
+def _sweeps(
+    line: Physical, controller: Controller, unresolved: list[str] | None
+) -> list[_AtOnce | _Summed]:
+    """What a sweep of *line*'s tones counts: its tones at once and, with
+    the controller's ``max_line_amplitude``, the sum of their envelopes."""
+    sweeps: list[_AtOnce | _Summed] = [_AtOnce(line)]
+    if controller.max_line_amplitude is not None:
+        sweeps.append(_Summed(line, controller.max_line_amplitude, unresolved))
+    return sweeps
 
 
 def against(lowered: ScheduledKernel, controller: Controller) -> list[str]:
@@ -446,16 +613,15 @@ def summarized(
         if len(handles) < 2:
             continue
         nodes = _loops._keep(tree, lambda i: _timed(events[i], handles))  # noqa: B023
-        at_once = _AtOnce(line)
+        controller = system.controllers[line.owner]
+        sweeps = _sweeps(line, controller, unresolved)
         try:
-            _count_copies(at_once, events, nodes, 0, (), 1, budget)
+            _count_copies(sweeps, events, nodes, 0, (), 1, budget)
         except ValueError:
             return None
-        message = at_once.message(lines)
-        if message is not None:
-            found.append(message)
+        found.extend(m for m in (each.message(lines) for each in sweeps) if m is not None)
         kept = [events[i] for i in _loops._events_of(nodes)]
-        found.extend(_per_line(lowered, line, system.controllers[line.owner], kept, unresolved))
+        found.extend(_per_line(lowered, line, controller, kept, unresolved))
     return found
 
 
@@ -469,7 +635,7 @@ def _window(node: Any, events: Sequence[Mapping[str, Any]]) -> tuple[int, int]:
 
 
 def _count_copies(
-    at_once: _AtOnce,
+    sweeps: Sequence[_AtOnce | _Summed],
     events: Sequence[Mapping[str, Any]],
     nodes: list[Any],
     shift: int,
@@ -478,7 +644,8 @@ def _count_copies(
     budget: Any,
 ) -> None:
     """Sweep *nodes* (``_loops._tree`` nodes, shifted by *shift* cycles, in
-    the *copy* of the loops around them), each violation counted *times*."""
+    the *copy* of the loops around them) with each of *sweeps*, each
+    violation counted *times*."""
     items: list[tuple[Any, int, tuple[Any, ...]]] = [(node, shift, copy) for node in nodes]
     while True:
         windows = [_window(node, events) for node, _, _ in items]
@@ -515,11 +682,13 @@ def _count_copies(
             # Its copies follow each other with the line otherwise free: each
             # plays what the first does, node.copies times.
             _count_copies(
-                at_once, events, node.body, dt, (*path, id(node.orig)), times * node.copies, budget
+                sweeps, events, node.body, dt, (*path, id(node.orig)), times * node.copies, budget
             )
-    before = at_once.count
-    at_once.sweep(sorted(played, key=_first))
-    at_once.count = before + (at_once.count - before) * times
+    ordered = sorted(played, key=_first)
+    for each in sweeps:
+        before = each.count
+        each.sweep(ordered)
+        each.count = before + (each.count - before) * times
 
 
 def _insert(entry: dict[str, Any], after: str, added: Sequence[tuple[str, Any]]) -> None:

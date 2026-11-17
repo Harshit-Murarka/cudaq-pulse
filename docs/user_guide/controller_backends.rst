@@ -700,11 +700,17 @@ program on dedicated lines costs nothing more to compile or export.
 
 The other limits of a ``Controller`` apply as follows on a shared line.
 Per tone, as each tone is its own sequencer: the spacing of its operations
-(``instruction_cycles``, ``min_idle_cycles``) and ``max_amplitude`` (the
-sum of concurrent tones is not checked yet). Per physical line: its
-waveform memory (``waveform_memory_samples`` with ``"per_line"``, the
-distinct shapes of all its tones) and ``max_frequencies_per_line`` (the distinct
-tone frequencies of all its tones). ``max_pulses`` counts every drive and
+(``instruction_cycles``, ``min_idle_cycles``) and ``max_amplitude``. Per
+physical line: its waveform memory (``waveform_memory_samples`` with
+``"per_line"``, the distinct shapes of all its tones),
+``max_frequencies_per_line`` (the distinct tone frequencies of all its
+tones) and ``max_line_amplitude``, the largest magnitude of the line's
+output. That output is the sum of the tones it plays at once, and where
+their phases line up, which tones of different frequencies reach, its
+magnitude is the sum of their envelopes' magnitudes; a line whose tones
+sum above ``max_line_amplitude`` at any time is a ``ControllerLimitError``
+naming the line, the cycle and the qudits, and tones in the two arms of one
+branch never sum. ``max_pulses`` counts every drive and
 readout, as on dedicated lines. A kernel with runtime qudits compiles on
 shared lines, and each call is checked for the tones at once when it binds
 its qudits.

@@ -439,8 +439,8 @@ def test_waveform_memory_counts_per_physical_line():
 
 def test_spacing_and_amplitude_are_per_handle():
     # Each handle is a tone slot of its own sequencer: two handles start
-    # together however many cycles one instruction takes, and the amplitude
-    # limit is each tone's (the sum of concurrent tones is not checked).
+    # together however many cycles one instruction takes, and max_amplitude
+    # is each tone's (the sum of the tones at once is max_line_amplitude's).
     @pulse.kernel
     def loud(a, b):
         ra = get_readout_line(a)
@@ -453,6 +453,127 @@ def test_spacing_and_amplitude_are_per_handle():
     _lowered(loud, qs, 0, 1)
     with pytest.raises(pulse.controller.ControllerLimitError, match="peaks at amplitude 0.6"):
         _lowered(loud, _feedline(2, (0, 1), max_amplitude=0.5), 0, 1)
+
+
+@pulse.kernel
+def loud_together(a, b):
+    ra = get_readout_line(a)
+    rb = get_readout_line(b)
+    sync(ra, rb)
+    readout(ra, square(200, 0.6))
+    readout(rb, gaussian(200, 0.5, 40.0))
+
+
+def test_a_shared_line_s_output_is_the_sum_of_its_tones():
+    # 0.6 flat and a gaussian peaking at 0.5 in the middle sum to 1.1 there.
+    with pytest.raises(pulse.controller.ControllerLimitError) as caught:
+        _lowered(loud_together, _feedline(2, (0, 1), max_line_amplitude=1.0), 0, 1)
+    assert list(caught.value.violations) == [
+        "the readout line of qudits 0..1 (controllers[0].readout_lines[0]) reaches amplitude "
+        "1.1 from cycle 0, the sum of the readouts of qudits 0, 1 it plays at once; the "
+        "controller plays at most 1 on a line (Controller.max_line_amplitude): lower their "
+        "amplitudes, or play some after the others end"
+    ]
+    _lowered(loud_together, _feedline(2, (0, 1), max_line_amplitude=1.1), 0, 1)
+    # Each tone alone is within max_amplitude; the sum is not its limit.
+    _lowered(loud_together, _feedline(2, (0, 1), max_amplitude=0.6), 0, 1)
+    # Tones in turn never sum; one tone alone above the limit is reported.
+    _lowered(in_turn, _feedline(2, (0, 1), max_line_amplitude=0.05), 0, 1)
+    with pytest.raises(pulse.controller.ControllerLimitError) as caught:
+        _lowered(in_turn, _feedline(2, (0, 1), max_line_amplitude=0.04), 0, 1)
+    (message,) = caught.value.violations
+    assert (
+        "reaches amplitude 0.05 from cycle 0, the readout of qudit 0, and does so 1 more time"
+        in (message)
+    )
+
+
+def test_the_line_amplitude_sums_only_tones_that_overlap():
+    @pulse.kernel
+    def staggered(a, b):
+        ra = get_readout_line(a)
+        rb = get_readout_line(b)
+        sync(ra, rb)
+        readout(ra, square(100, 0.6))
+        wait(rb, 60)
+        readout(rb, square(100, 0.6))
+
+    with pytest.raises(
+        pulse.controller.ControllerLimitError, match="reaches amplitude 1.2 from cycle 60"
+    ):
+        _lowered(staggered, _feedline(2, (0, 1), max_line_amplitude=1.0), 0, 1)
+    # A ramp that has fallen to 0.3 where the second tone starts sums to 0.9.
+
+    @pulse.kernel
+    def ramp_then_flat(a, b):
+        ra = get_readout_line(a)
+        rb = get_readout_line(b)
+        sync(ra, rb)
+        readout(ra, custom_samples([0.6] * 50 + [0.3] * 50))
+        wait(rb, 50)
+        readout(rb, square(50, 0.6))
+
+    _lowered(ramp_then_flat, _feedline(2, (0, 1), max_line_amplitude=0.95), 0, 1)
+    with pytest.raises(pulse.controller.ControllerLimitError, match="reaches amplitude 0.9 "):
+        _lowered(ramp_then_flat, _feedline(2, (0, 1), max_line_amplitude=0.85), 0, 1)
+
+
+def test_tones_in_different_arms_of_a_branch_never_sum():
+    @pulse.kernel
+    def either(a, b, c):
+        ra = get_readout_line(a)
+        rb = get_readout_line(b)
+        rc = get_readout_line(c)
+        m = readout(ra, square(100, 0.1))
+        sync(ra, rb, rc)
+        if m:
+            readout(rb, square(100, 0.6))
+        else:
+            readout(rc, square(100, 0.6))
+        readout(ra, square(100, 0.3))
+
+    qs = _feedline(3, (0, 1, 2), max_line_amplitude=0.9)
+    _lowered(either, qs, 0, 1, 2)
+    with pytest.raises(pulse.controller.ControllerLimitError) as caught:
+        _lowered(either, _feedline(3, (0, 1, 2), max_line_amplitude=0.85), 0, 1, 2)
+    (message,) = caught.value.violations
+    assert "reaches amplitude 0.9 from cycle 100, the sum of the readouts of qudits 2, 0" in message
+    assert "more time" not in message
+
+
+def test_the_line_amplitude_is_checked_every_iteration_of_a_rolled_loop():
+    @pulse.kernel
+    def rolled_loud(a, b):
+        ra = get_readout_line(a)
+        rb = get_readout_line(b)
+        for _ in range(500):
+            sync(ra, rb)
+            readout(ra, square(100, 0.6))
+            readout(rb, square(100, 0.6))
+
+    qs = _feedline(2, (0, 1), max_line_amplitude=1.0)
+    with pytest.raises(pulse.controller.ControllerLimitError) as caught:
+        _lowered(rolled_loud, qs, 0, 1, unroll_threshold=10)
+    (message,) = caught.value.violations
+    assert "reaches amplitude 1.2 from cycle 0" in message
+    assert "and does so 499 more times" in message
+    unrolled = _lowered(rolled_loud, _feedline(2, (0, 1)), 0, 1)
+    controller = pulse.Controller(
+        readout_lines=[ReadoutLine([0, 1], max_concurrent_tones=2)], max_line_amplitude=1.0
+    )
+    assert list(pulse.controller.check(unrolled, controller)) == [message]
+    _lowered(rolled_loud, _feedline(2, (0, 1), max_line_amplitude=1.2), 0, 1, unroll_threshold=10)
+
+
+def test_the_line_amplitude_is_a_limit_of_the_controller():
+    qs = _feedline(2, (0, 1), max_line_amplitude=1.5)
+    lowered = _lowered(loud_together, qs, 0, 1)
+    assert lowered.export_to_controller()["limits"]["max_line_amplitude"] == 1.5
+    assert lowered.export_to_controller(version=2)["controller"]["max_line_amplitude"] == 1.5
+    assert "max_line_amplitude" not in pulse.Controller().as_dict()
+    for wrong in (0, -1.0, float("inf"), float("nan"), True, "1"):
+        with pytest.raises(pulse.InvalidValueError, match="max_line_amplitude must be a positive"):
+            pulse.Controller(max_line_amplitude=wrong)  # type: ignore[arg-type]
 
 
 def test_a_rolled_loop_on_a_feedline_is_checked_every_iteration():

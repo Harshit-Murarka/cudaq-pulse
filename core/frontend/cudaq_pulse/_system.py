@@ -713,6 +713,13 @@ class Controller:
     (``None``: no limit). The compiler sets no amplitude limit of its own;
     a drive or readout whose envelope peaks above this one is a violation
     naming its line. Exports list it among the limits only when it is set.
+    ``max_line_amplitude``: the largest magnitude the output of a shared
+    line reaches (``None``: no limit): the sum of the envelopes' magnitudes
+    of the tones it plays at once, which their phases reach when they line
+    up. A shared line whose tones sum above it is a violation naming the
+    line, where and the tones; tones in different arms of a branch never
+    sum. A dedicated line plays one tone at a time, which ``max_amplitude``
+    bounds. Exports list it among the limits only when it is set.
     ``detectors`` and ``detector_recovery_cycles``: the detector reading
     each qudit; readouts on one detector are serialized, each holding it
     for its duration plus ``detector_recovery_cycles``.
@@ -797,6 +804,7 @@ class Controller:
     waveform_memory_samples: int | None = None
     max_frequencies_per_line: int | None = None
     max_amplitude: float | None = None
+    max_line_amplitude: float | None = None
     detectors: Mapping[int, int] = field(default_factory=dict)
     detector_recovery_cycles: int = 0
     feedback_latency_cycles: int = 0
@@ -868,16 +876,17 @@ class Controller:
                 or value < 0
             ):
                 raise InvalidValueError(f"Controller.{name} must be a finite number >= 0")
-        peak = self.max_amplitude
-        if peak is not None and (
-            isinstance(peak, bool)
-            or not isinstance(peak, (int, float))
-            or not math.isfinite(peak)
-            or not peak > 0
-        ):
-            raise InvalidValueError(
-                f"Controller.max_amplitude must be a positive number or None, got {peak!r}"
-            )
+        for name in ("max_amplitude", "max_line_amplitude"):
+            peak = getattr(self, name)
+            if peak is not None and (
+                isinstance(peak, bool)
+                or not isinstance(peak, (int, float))
+                or not math.isfinite(peak)
+                or not peak > 0
+            ):
+                raise InvalidValueError(
+                    f"Controller.{name} must be a positive number or None, got {peak!r}"
+                )
         rate = self.sample_rate_ghz
         if rate is not None and (
             isinstance(rate, bool)
@@ -981,7 +990,12 @@ class Controller:
         # Every field in order: the class has none that fields() would leave out.
         data = {name: getattr(self, name) for name in self.__dataclass_fields__}
         data["detectors"] = {str(k): v for k, v in sorted(self.detectors.items())}
-        for name in ("max_amplitude", "max_instructions", "max_program_duration"):
+        for name in (
+            "max_amplitude",
+            "max_line_amplitude",
+            "max_instructions",
+            "max_program_duration",
+        ):
             if data[name] is None:
                 del data[name]
         if not self.min_pulse_cycles:
