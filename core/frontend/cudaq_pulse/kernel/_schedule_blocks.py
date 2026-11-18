@@ -91,7 +91,9 @@ def block_budget(kernel: Any, builder: Any) -> int | None:
     if not getattr(builder, "schedule_blocks", False):
         raise CompilationError(
             f"flatten_schedules=True schedules {name}() with its caller, so its "
-            "max_duration_cycles cannot hold; compile without flatten_schedules"
+            "max_duration_cycles cannot hold",
+            code="own_schedule",
+            fix="compile without flatten_schedules",
         )
     return int(cycles)
 
@@ -107,7 +109,7 @@ def check_root_schedule(schedule: str, builder: Any) -> None:
     """Reject resource-constrained scheduling of a program with blocks."""
     if schedule in ROOT_ONLY_SCHEDULES and builder.schedule_block_count:
         raise CompilationError(
-            f"schedule={schedule!r} does not support kernels called with their own "
-            "schedule= yet; remove schedule= from the called kernels, or compile "
-            "with flatten_schedules=True"
+            f"schedule={schedule!r} does not support kernels called with their own schedule= yet",
+            code="own_schedule",
+            fix="remove schedule= from the called kernels, or compile with flatten_schedules=True",
         )

@@ -302,10 +302,33 @@ def test_a_float_parameter_does_not_change_a_blocks_schedule():
 @pytest.mark.parametrize("policy", ["rcp", "alap_rcp"])
 def test_resource_constrained_programs_reject_blocks(policy):
     top = _after_long_drive(asap_pair)
-    with pytest.raises(pulse.CompilationError, match="flatten_schedules=True"):
+    with pytest.raises(pulse.CompilationError, match="flatten_schedules=True") as raised:
         pulse.compile(top, schedule=policy).lower(*_qudits(3))
+    assert raised.value.code is pulse.ErrorCode.OWN_SCHEDULE
+    assert raised.value.fix == (
+        "remove schedule= from the called kernels, or compile with flatten_schedules=True"
+    )
+    assert str(raised.value) == (
+        f"schedule={policy!r} does not support kernels called with their own schedule= yet; "
+        "remove schedule= from the called kernels, or compile with flatten_schedules=True"
+    )
     flat = pulse.compile(top, schedule=policy, flatten_schedules=True).lower(*_qudits(3))
     assert len(flat.schedule) == 3
+
+
+def test_a_tool_can_flatten_on_the_code_alone():
+    def lower(kernel, **options):
+        try:
+            return pulse.compile(kernel, schedule="rcp", **options).lower(*_qudits(3))
+        except pulse.CompilationError as error:
+            if error.code != "own_schedule" or options.get("flatten_schedules"):
+                raise
+        return lower(kernel, **options, flatten_schedules=True)
+
+    top = _after_long_drive(asap_pair)
+    assert lower(top).schedule == (
+        pulse.compile(top, schedule="rcp", flatten_schedules=True).lower(*_qudits(3)).schedule
+    )
 
 
 def test_native_scheduler_rejects_resource_limits_with_blocks():

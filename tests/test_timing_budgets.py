@@ -61,8 +61,10 @@ def test_a_budget_needs_a_kernel_with_its_own_schedule():
 
 def test_flattening_a_budgeted_kernel_is_an_error():
     program = repeated(cycle_of(80))
-    with pytest.raises(pulse.CompilationError, match="compile without flatten_schedules"):
+    with pytest.raises(pulse.CompilationError, match="compile without flatten_schedules") as raised:
         pulse.compile(program, flatten_schedules=True).lower(Q[0])
+    assert raised.value.code is pulse.ErrorCode.OWN_SCHEDULE
+    assert raised.value.fix == "compile without flatten_schedules"
 
 
 def test_the_compiled_kernel_bounds_the_whole_program():

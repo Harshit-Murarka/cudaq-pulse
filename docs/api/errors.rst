@@ -97,6 +97,9 @@ Code                        What it means
 ``python_error``            Python code of the kernel that failed as it would outside
                             one; the message holds Python's error.
 ``control_system``          A program the control system cannot play as written.
+``own_schedule``            A kernel called with its own ``schedule=`` that the program
+                            cannot schedule on its own, such as under ``rcp``; ``fix``
+                            says whether to compile with ``flatten_schedules=True``.
 ``timing``                  A missed deadline or length limit (``TimingError``).
 ``controller_limit``        A limit of the controller exceeded
                             (``ControllerLimitError``).

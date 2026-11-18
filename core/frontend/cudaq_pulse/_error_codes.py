@@ -64,6 +64,12 @@ class ErrorCode(StrEnum):
     #: not have, a qudit the quantum system does not define, a call across
     #: its controllers.
     CONTROL_SYSTEM = "control_system"
+    #: A kernel called with its own ``schedule=`` that the program cannot
+    #: schedule on its own: under ``rcp`` or ``alap_rcp``, which schedule a
+    #: whole program, or with a ``max_duration_cycles`` that
+    #: ``flatten_schedules=True`` cannot hold. ``fix`` says whether to
+    #: compile with ``flatten_schedules=True`` or without it.
+    OWN_SCHEDULE = "own_schedule"
     #: A program that misses a timing it declares (``TimingError``).
     TIMING = "timing"
     #: A program over a limit of its controller (``ControllerLimitError``).

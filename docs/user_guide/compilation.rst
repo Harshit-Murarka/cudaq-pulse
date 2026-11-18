@@ -177,7 +177,10 @@ timing is the same wherever it is called -- also inside a rolled loop. A
 called kernel without ``schedule=`` is scheduled together with its caller.
 ``rcp`` and ``alap_rcp`` apply to a whole program: they are accepted only by
 ``pulse.compile``, and not yet for programs that call kernels with their own
-``schedule=`` (compile with ``flatten_schedules=True`` instead). A kernel's
+``schedule=`` (compile with ``flatten_schedules=True`` instead); that
+``CompilationError`` has the code ``ErrorCode.OWN_SCHEDULE``, so a tool that
+compiles programs it did not write can retry with ``flatten_schedules=True``
+on the code, without reading the message. A kernel's
 policy is part of what it is, so a compiled kernel's specializations depend
 on its own policy, ``flatten_schedules`` and the policies of the kernels it
 calls. The shape holds when the program is scheduled again, with float
@@ -209,7 +212,8 @@ call, cannot be inside a budget.
 Compiling ``repeated`` fails with the length of ``round_`` when it exceeds
 2000 cycles. A kernel with a budget but without ``schedule=`` is scheduled
 with its caller, so its calls have no length of their own: compiling a
-caller is an error that names the fix, as is ``flatten_schedules=True``.
+caller is an error that names the fix, as is ``flatten_schedules=True``
+(code ``ErrorCode.OWN_SCHEDULE``).
 
 Inspecting a compilation
 ------------------------

@@ -73,6 +73,14 @@ release's `## [X.Y.Z] - Unreleased`, in the pull request that makes it.
   The buses are wiring, given when a description is loaded. There are
   none by default and spacing is off, and the export lists both only when
   set, so existing programs and exports are unchanged.
+- **An error code for kernels with their own schedule.**
+  `ErrorCode.OWN_SCHEDULE` (`"own_schedule"`) is the code of the
+  `CompilationError` that `schedule="rcp"` or `"alap_rcp"` raises for a
+  program calling kernels with their own `schedule=`, and of the one
+  `flatten_schedules=True` raises for a called kernel's
+  `max_duration_cycles`. A tool that compiles programs it did not write
+  retries with `flatten_schedules=True` on the code instead of matching
+  the message. The messages read as before; `fix` holds their fix.
 - **Phase gates.** `pulse.gates.Z`, `S` and `T` are virtual Z rotations by
   pi, pi / 2 and pi / 4. `get_calibration` gives each as a `VirtualZ`
   (`cudaq_pulse.quantum_systems.VirtualZ(phase_rad=...)`), derived on every
